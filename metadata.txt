@@ -1,0 +1,38 @@
+; Plugin metadata file for QGIS Plugin Manager
+; See: https://docs.qgis.org/latest/en/docs/pyqgis_developer_cookbook/plugins/plugins.html#plugin-metadata-table
+
+[general]
+name=Archaeological Sites Visualizer
+qgisMinimumVersion=3.16
+qgisMaximumVersion=3.99
+description=Visualization, annotation and validation of archaeological sites in georeferenced aerial images
+version=0.1.0
+author=Grupo 09 - Taller de Integracion
+email=javipaz.larrain@uc.cl
+
+about=This plugin provides tools for visualizing, annotating and validating archaeological sites detected in georeferenced aerial images. It allows users to review AI-generated detections, add manual annotations, and export validated results for research purposes.
+
+tracker=https://github.com/JaviL13/Taller-de-Integracion-G09/issues
+repository=https://github.com/JaviL13/Taller-de-Integracion-G09
+
+; Tags are comma separated and must not contain spaces
+tags=archaeology,aerial,annotation,visualization,georeferencing,remote sensing
+
+homepage=https://github.com/JaviL13/Taller-de-Integracion-G09
+category=Raster
+icon=icon.png
+
+; Experimental flag
+experimental=True
+deprecated=False
+
+; Server flag (set to True if plugin provides server functionality)
+server=False
+
+; changelog
+changelog=
+    0.1.0 - Initial release
+            * Basic plugin structure
+                    * Aerial image visualization
+                            * Site annotation tools
+                                    * Metadata validation
