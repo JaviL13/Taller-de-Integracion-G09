@@ -10,7 +10,7 @@ on:
                               - main
                                     - develop
 
-                                    jobs:
+                                jobs:
                                       lint:
                                           name: Lint
                                               runs-on: ubuntu-latest
