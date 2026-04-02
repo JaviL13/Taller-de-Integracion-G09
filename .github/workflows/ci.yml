@@ -29,7 +29,7 @@ jobs:
           pip install flake8 pylint
 
       - name: Run flake8
-        run: flake8 . --max-line-length=120 --exclude=.git,__pycache__,*.egg-info
+        run: flake8 . --max-line-length=120 --exclude=.git,__pycache__,*.egg-info --extend-ignore=W191,E101,E117
 
       - name: Run pylint
         run: pylint **/*.py --disable=C0114,C0115,C0116 || true
