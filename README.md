@@ -78,6 +78,55 @@ cp -r Taller-de-Integracion-G09 ~/.local/share/QGIS/QGIS3/profiles/default/pytho
 Luego activa el plugin desde QGIS en **Plugins → Administrar e instalar complementos**.
 
 ---
+## Setup para desarrolladoras
+
+Sigue estos pasos **una sola vez** para tener el plugin funcionando en tu QGIS local.
+
+### 1. Instalar QGIS
+
+Descarga e instala QGIS 3.16 LTR o superior desde [qgis.org](https://qgis.org/es/site/forusers/download.html).
+
+### 2. Clonar el repositorio
+
+```bash
+git clone https://github.com/JaviL13/Taller-de-Integracion-G09.git ~/Desktop/Taller-de-Integracion-G09
+```
+
+### 3. Crear el symlink hacia la carpeta de plugins de QGIS
+
+**Mac/Linux:**
+```bash
+ln -s ~/Desktop/Taller-de-Integracion-G09 ~/Library/Application\ Support/QGIS/QGIS3/profiles/default/python/plugins/GeoGlyph
+```
+
+**Windows:**
+```bash
+mklink /D "%APPDATA%\QGIS\QGIS3\profiles\default\python\plugins\GeoGlyph" "%USERPROFILE%\Desktop\Taller-de-Integracion-G09"
+```
+
+> Con el symlink, cualquier cambio que hagas en el repo se refleja directamente en QGIS sin copiar archivos.
+
+### 4. Instalar Plugin Reloader en QGIS
+
+1. Abre QGIS
+2. Ve a **Complementos → Administrar e instalar complementos**
+3. En **Configuración**, activa "Mostrar también complementos experimentales"
+4. Busca `Plugin Reloader` e instálalo
+
+### 5. Activar el plugin GeoGlyph
+
+1. En el gestor de complementos, ve a la pestaña **Instalado**
+2. Busca `GeoGlyph` y activa la casilla
+3. El plugin debería aparecer en **Raster → GeoGlyph**
+
+### Flujo de trabajo diario
+
+1. Edita los archivos en el repo normalmente
+2. En QGIS, recarga el plugin con **Complementos → Plugin Reloader → Reload Plugin: GeoGlyph**
+3. Los cambios se reflejan sin necesidad de reiniciar QGIS
+4. Cuando el cambio funciona, haz commit y push normalmente
+
+---
 
 ## Configuración inicial
 
