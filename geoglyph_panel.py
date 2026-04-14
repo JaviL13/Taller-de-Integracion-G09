@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
+#Se importan los componentes visuales
 from qgis.PyQt.QtWidgets import (
     QDockWidget, QWidget, QVBoxLayout,
     QPushButton, QLabel, QFrame, QSizePolicy
@@ -11,10 +12,11 @@ from qgis.PyQt.QtGui import QIcon
 class GeoGlyphPanel(QDockWidget):
     """Panel lateral acoplable de GeoGlyph."""
 
-    def __init__(self, iface, parent=None):
-        super(GeoGlyphPanel, self).__init__("GeoGlyph", parent)
+    def __init__(self, iface, parent=None): #Recibe iface (interfaz de QGIS)
+        super(GeoGlyphPanel, self).__init__("GeoGlyph", parent) #ventana principal de QGIS
         self.iface = iface
         self.setObjectName("GeoGlyphPanel")  # necesario para persistir entre sesiones
+        #Le da un nombre único al panel. QGIS usa este nombre para recordar la posición del panel entre sesiones (si lo moviste a la izquierda, la próxima vez aparece en la izquierda). Sin esto, el panel no persiste.
 
         # Widget contenedor principal
         container = QWidget()
@@ -22,7 +24,7 @@ class GeoGlyphPanel(QDockWidget):
         layout.setAlignment(Qt.AlignTop)
         container.setLayout(layout)
 
-        # ── Sección: Cargar GeoTIFF ──────────────────────────
+        #Sección: Cargar GeoTIFF 
         layout.addWidget(self._seccion_titulo(" Cargar imagen"))
 
         self.btn_abrir_tiff = QPushButton("Abrir GeoTIFF")
@@ -31,7 +33,7 @@ class GeoGlyphPanel(QDockWidget):
 
         layout.addWidget(self._separador())
 
-        # ── Sección: Realce Visual ───────────────────────────
+        #  Sección: Realce Visual
         layout.addWidget(self._seccion_titulo(" Realce visual"))
 
         btn_color_ramp = QPushButton("Aplicar Color Ramp")
@@ -51,7 +53,7 @@ class GeoGlyphPanel(QDockWidget):
 
         layout.addWidget(self._separador())
 
-        # ── Sección: Anotaciones ─────────────────────────────
+        # Sección: Anotaciones 
         layout.addWidget(self._seccion_titulo(" Anotaciones"))
 
         btn_importar = QPushButton("Importar detecciones")
@@ -66,7 +68,7 @@ class GeoGlyphPanel(QDockWidget):
 
         layout.addWidget(self._separador())
 
-        # ── Sección: Inferencia ML ───────────────────────────
+        # Sección: Inferencia ML 
         layout.addWidget(self._seccion_titulo(" Inferencia ML"))
 
         btn_inferencia = QPushButton("Ejecutar inferencia SAM")
