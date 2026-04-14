@@ -21,7 +21,7 @@
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication
+from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 
@@ -29,6 +29,7 @@ from qgis.PyQt.QtWidgets import QAction
 from .resources import *
 # Import the code for the dialog
 from .geoglyph_dialog import GeoGlyphDialog
+from .geoglyph_panel import GeoGlyphPanel
 import os.path
 
 
@@ -62,10 +63,11 @@ class GeoGlyph:
         # Declare instance attributes
         self.actions = []
         self.menu = self.tr(u'&GeoGlyph')
+        self.panel = None
 
         # Check if plugin was started the first time in current QGIS session
         # Must be set in initGui() to survive plugin reloads
-        self.first_start = None
+        #self.first_start = None
 
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -168,7 +170,16 @@ class GeoGlyph:
             parent=self.iface.mainWindow())
 
         # will be set False in run()
-        self.first_start = True
+        #self.first_start = True
+
+        # Crear y registrar el panel lateral
+        self.panel = GeoGlyphPanel(self.iface, self.iface.mainWindow())
+
+        # Conectar el botón "Abrir GeoTIFF" del panel al diálogo existente
+        self.panel.btn_abrir_tiff.clicked.connect(self.abrir_geotiff)
+
+        # Agregar el panel a QGIS (lado derecho por defecto)
+        self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
 
 
     def unload(self):
@@ -178,21 +189,33 @@ class GeoGlyph:
                 self.tr(u'&GeoGlyph'),
                 action)
             self.iface.removeToolBarIcon(action)
+        
+        if self.panel is not None:
+            self.iface.removeDockWidget(self.panel)
+            self.panel = None
 
+    def abrir_geotiff(self):
+        """Abre el diálogo para cargar un GeoTIFF."""
+        dlg = GeoGlyphDialog(self.iface)
+        dlg.exec_()
 
     def run(self):
         """Run method that performs all the real work"""
 
         # Create the dialog with elements (after translation) and keep reference
         # Only create GUI ONCE in callback, so that it will only load when the plugin is started
-        self.dlg = GeoGlyphDialog(self.iface)
+        #self.dlg = GeoGlyphDialog(self.iface)
 
         # show the dialog
-        self.dlg.show()
+        #self.dlg.show()
         # Run the dialog event loop
-        result = self.dlg.exec_()
+        #result = self.dlg.exec_()
         # See if OK was pressed
-        if result:
+        #if result:
             # Do something useful here - delete the line containing pass and
             # substitute with your code.
-            pass
+        #    pass
+
+        """Muestra/oculta el panel lateral."""
+        if self.panel is not None:
+            self.panel.setVisible(not self.panel.isVisible())
