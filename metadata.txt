@@ -2,7 +2,7 @@
 ; See: https://docs.qgis.org/latest/en/docs/pyqgis_developer_cookbook/plugins/plugins.html#plugin-metadata-table
 
 [general]
-name=Archaeological Sites Visualizer
+name=GeoGlyph
 qgisMinimumVersion=3.16
 qgisMaximumVersion=3.99
 description=Visualization, annotation and validation of archaeological sites in georeferenced aerial images
