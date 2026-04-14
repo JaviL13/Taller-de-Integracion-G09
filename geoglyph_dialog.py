@@ -27,13 +27,16 @@ import os
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
 
+
+from qgis.core import QgsRasterLayer, QgsProject
+
 # This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
     os.path.dirname(__file__), 'geoglyph_dialog_base.ui'))
 
 
 class GeoGlyphDialog(QtWidgets.QDialog, FORM_CLASS):
-    def __init__(self, parent=None):
+    def __init__(self, iface, parent=None):
         """Constructor."""
         super(GeoGlyphDialog, self).__init__(parent)
         # Set up the user interface from Designer through FORM_CLASS.
@@ -42,3 +45,51 @@ class GeoGlyphDialog(QtWidgets.QDialog, FORM_CLASS):
         # http://qt-project.org/doc/qt-4.8/designer-using-a-ui-file.html
         # #widgets-and-dialogs-with-auto-connect
         self.setupUi(self)
+        self.iface = iface
+
+        if self.layout() is None:
+            from qgis.PyQt.QtWidgets import QVBoxLayout
+            layout = QVBoxLayout()
+            self.setLayout(layout)
+        
+        # Crear el botón "Abrir GeoTIFF"
+        self.btn_open_tiff = QtWidgets.QPushButton("Abrir GeoTIFF", self)
+        self.btn_open_tiff.clicked.connect(self.open_geotiff)
+
+        # Agregar el botón al layout del diálogo
+        self.layout().addWidget(self.btn_open_tiff)
+
+    def open_geotiff(self):
+        # Abre el explorador de archivos para seleccionar un .tif
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Seleccionar GeoTIFF",
+            "",
+            "GeoTIFF (*.tif *.tiff)"
+        )
+
+        if not file_path:
+            return  # El usuario canceló
+
+        # Obtener el nombre del archivo sin extensión como nombre de la capa
+        layer_name = os.path.splitext(os.path.basename(file_path))[0]
+
+        # Crear la capa raster
+        layer = QgsRasterLayer(file_path, layer_name)
+
+        if not layer.isValid():
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error",
+                f"No se pudo cargar el archivo:\n{file_path}"
+            )
+            return
+
+        # Agregar la capa al proyecto de QGIS
+        QgsProject.instance().addMapLayer(layer)
+
+        QtWidgets.QMessageBox.information(
+            self,
+            "Éxito",
+            f"Capa '{layer_name}' cargada correctamente.\nCRS: {layer.crs().authid()}"
+        )
