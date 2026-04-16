@@ -217,11 +217,20 @@ class GeoGlyph:
         #Obtener número de bandas
         band_count = provider.bandCount()
 
+        # Guardar banda actual (si existe)
+        current_band = self.panel.combo_band.currentText()
+
         #Modificar botón lateral
         self.panel.combo_band.clear()
 
         for i in range(1, band_count + 1):
             self.panel.combo_band.addItem(str(i))
+
+        # Restaurar selección si es válida
+        if current_band:
+            index = self.panel.combo_band.findText(current_band)
+            if index != -1:
+                self.panel.combo_band.setCurrentIndex(index)
 
     def apply_color_ramp(self):
         from qgis.core import(
@@ -249,10 +258,24 @@ class GeoGlyph:
         #Banda seleccionada por usuario
         band = int(self.panel.combo_band.currentText())
 
-        # Obtener min/max automáticamente
+        # Obtener min/max
         stats = provider.bandStatistics(band)
-        min_val = stats.minimumValue
-        max_val = stats.maximumValue
+        min_text = self.panel.input_min.text().strip()
+        max_text = self.panel.input_max.text().strip()
+
+        # Automáticamente si está vacío
+        min_val = float(min_text) if min_text else stats.minimumValue
+        max_val = float(max_text) if max_text else stats.maximumValue
+
+        #Validar que min<max
+        if min_val >= max_val:
+            self.iface.messageBar().pushMessage(
+                "Error",
+                "Min debe ser menor que Max",
+                level=2, #mensaje de error
+                duration=3
+            )
+            return
 
         # Crear color ramp (viridis simple, rojo, verde, azul)
         color_ramp = QgsColorRampShader()
