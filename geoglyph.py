@@ -21,15 +21,15 @@
  *                                                                         *
  ***************************************************************************/
 """
+# -*- coding: utf-8 -*-
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 
-# Initialize Qt resources from file resources.py
 from .resources import *
-# Import the code for the dialog
 from .geoglyph_dialog import GeoGlyphDialog
 from .geoglyph_panel import GeoGlyphPanel
+from .http_worker import EnhanceWorker  # ← nuevo en TIGS-42
 import os.path
 
 
@@ -37,104 +37,30 @@ class GeoGlyph:
     """QGIS Plugin Implementation."""
 
     def __init__(self, iface):
-        """Constructor.
-
-        :param iface: An interface instance that will be passed to this class
-            which provides the hook by which you can manipulate the QGIS
-            application at run time.
-        :type iface: QgsInterface
-        """
-        # Save reference to the QGIS interface
         self.iface = iface
-        # initialize plugin directory
         self.plugin_dir = os.path.dirname(__file__)
-        # initialize locale
         locale = QSettings().value('locale/userLocale')[0:2]
         locale_path = os.path.join(
-            self.plugin_dir,
-            'i18n',
-            'GeoGlyph_{}.qm'.format(locale))
-
+            self.plugin_dir, 'i18n', 'GeoGlyph_{}.qm'.format(locale)
+        )
         if os.path.exists(locale_path):
             self.translator = QTranslator()
             self.translator.load(locale_path)
             QCoreApplication.installTranslator(self.translator)
 
-        # Declare instance attributes
         self.actions = []
         self.menu = self.tr(u'&GeoGlyph')
         self.panel = None
+        self._worker = None  # referencia al worker activo (evita GC prematuro)
 
-        # Check if plugin was started the first time in current QGIS session
-        # Must be set in initGui() to survive plugin reloads
-        #self.first_start = None
-
-    # noinspection PyMethodMayBeStatic
     def tr(self, message):
-        """Get the translation for a string using Qt translation API.
-
-        We implement this ourselves since we do not inherit QObject.
-
-        :param message: String for translation.
-        :type message: str, QString
-
-        :returns: Translated version of message.
-        :rtype: QString
-        """
-        # noinspection PyTypeChecker,PyArgumentList,PyCallByClass
         return QCoreApplication.translate('GeoGlyph', message)
 
-
     def add_action(
-        self,
-        icon_path,
-        text,
-        callback,
-        enabled_flag=True,
-        add_to_menu=True,
-        add_to_toolbar=True,
-        status_tip=None,
-        whats_this=None,
-        parent=None):
-        """Add a toolbar icon to the toolbar.
-
-        :param icon_path: Path to the icon for this action. Can be a resource
-            path (e.g. ':/plugins/foo/bar.png') or a normal file system path.
-        :type icon_path: str
-
-        :param text: Text that should be shown in menu items for this action.
-        :type text: str
-
-        :param callback: Function to be called when the action is triggered.
-        :type callback: function
-
-        :param enabled_flag: A flag indicating if the action should be enabled
-            by default. Defaults to True.
-        :type enabled_flag: bool
-
-        :param add_to_menu: Flag indicating whether the action should also
-            be added to the menu. Defaults to True.
-        :type add_to_menu: bool
-
-        :param add_to_toolbar: Flag indicating whether the action should also
-            be added to the toolbar. Defaults to True.
-        :type add_to_toolbar: bool
-
-        :param status_tip: Optional text to show in a popup when mouse pointer
-            hovers over the action.
-        :type status_tip: str
-
-        :param parent: Parent widget for the new action. Defaults None.
-        :type parent: QWidget
-
-        :param whats_this: Optional text to show in the status bar when the
-            mouse pointer hovers over the action.
-
-        :returns: The action that was created. Note that the action is also
-            added to self.actions list.
-        :rtype: QAction
-        """
-
+        self, icon_path, text, callback, enabled_flag=True,
+        add_to_menu=True, add_to_toolbar=True,
+        status_tip=None, whats_this=None, parent=None
+    ):
         icon = QIcon(icon_path)
         action = QAction(icon, text, parent)
         action.triggered.connect(callback)
@@ -142,197 +68,97 @@ class GeoGlyph:
 
         if status_tip is not None:
             action.setStatusTip(status_tip)
-
         if whats_this is not None:
             action.setWhatsThis(whats_this)
-
         if add_to_toolbar:
-            # Adds plugin icon to Plugins toolbar
             self.iface.addToolBarIcon(action)
-
         if add_to_menu:
-            self.iface.addPluginToRasterMenu(
-                self.menu,
-                action)
+            self.iface.addPluginToRasterMenu(self.menu, action)
 
         self.actions.append(action)
-
         return action
 
     def initGui(self):
-        """Create the menu entries and toolbar icons inside the QGIS GUI."""
-
+        """Crea entradas de menú, toolbar y panel lateral."""
         icon_path = ':/plugins/geoglyph/icon.png'
         self.add_action(
             icon_path,
             text=self.tr(u'GeoGlyph'),
             callback=self.run,
-            parent=self.iface.mainWindow())
+            parent=self.iface.mainWindow()
+        )
 
-        # will be set False in run()
-        #self.first_start = True
-
-        # Crear y registrar el panel lateral
         self.panel = GeoGlyphPanel(self.iface, self.iface.mainWindow())
 
-        # Conectar el botón "Abrir GeoTIFF" del panel al diálogo existente
+        # Conexiones de botones
         self.panel.btn_abrir_tiff.clicked.connect(self.abrir_geotiff)
+        self.panel.btn_inferencia.clicked.connect(self._ejecutar_inferencia)  # ← nuevo
 
-        # Conectar el botón "Aplicar Color Ramp" del panel
-        self.panel.btn_color_ramp.clicked.connect(self.apply_color_ramp)
-
-        #Modificar número de bandas según capa seleccionada
-        self.iface.layerTreeView().selectionModel().selectionChanged.connect(self.cargar_bandas)
-
-        # Agregar el panel a QGIS (lado derecho por defecto)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
 
-
     def unload(self):
-        """Removes the plugin menu item and icon from QGIS GUI."""
+        """Elimina el plugin del menú y toolbar de QGIS."""
         for action in self.actions:
-            self.iface.removePluginRasterMenu(
-                self.tr(u'&GeoGlyph'),
-                action)
+            self.iface.removePluginRasterMenu(self.tr(u'&GeoGlyph'), action)
             self.iface.removeToolBarIcon(action)
-        
+
         if self.panel is not None:
             self.iface.removeDockWidget(self.panel)
             self.panel = None
+
+        # Detener worker si sigue corriendo al cerrar el plugin
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.quit()
+            self._worker.wait()
 
     def abrir_geotiff(self):
         """Abre el diálogo para cargar un GeoTIFF."""
         dlg = GeoGlyphDialog(self.iface)
         dlg.exec_()
 
-    def cargar_bandas(self): #Número de bandas que tiene una capa
-        layers = self.iface.layerTreeView().selectedLayers() #capa seleccionada
-
-        if not layers:
-            return
-
-        layer = layers[0]
-        provider = layer.dataProvider()
-
-        #Obtener número de bandas
-        band_count = provider.bandCount()
-
-        # Guardar banda actual (si existe)
-        current_band = self.panel.combo_band.currentText()
-
-        #Modificar botón lateral
-        self.panel.combo_band.clear()
-
-        for i in range(1, band_count + 1):
-            self.panel.combo_band.addItem(str(i))
-
-        # Restaurar selección si es válida
-        if current_band:
-            index = self.panel.combo_band.findText(current_band)
-            if index != -1:
-                self.panel.combo_band.setCurrentIndex(index)
-
-    def apply_color_ramp(self):
-        from qgis.core import(
-            QgsRasterShader, #aplica los colores
-            QgsColorRampShader, #define los colores
-            QgsSingleBandPseudoColorRenderer, #muestra los resultados
-            QgsProject, #agrega la capa al mapa
-        )
-        from PyQt5.QtGui import QColor #define colores
-
-        #Obtener tipo de esquema de color
-        ramp_type = self.panel.combo_color_ramp.currentText()
-        
-        #Obtener la capa seleccionada en QGIS
-        layer = self.iface.activeLayer()
-
-        #Evita error si el usuario no seleccionó nada
-        if layer is None:
-            self.iface.messageBar().pushMessage("Error", "No hay capa activa", level=2)
-            return
-
-        #Acceder a los datos del ráster
-        provider = layer.dataProvider()
-
-        #Banda seleccionada por usuario
-        band = int(self.panel.combo_band.currentText())
-
-        # Obtener min/max
-        stats = provider.bandStatistics(band)
-        min_text = self.panel.input_min.text().strip()
-        max_text = self.panel.input_max.text().strip()
-
-        # Automáticamente si está vacío
-        min_val = float(min_text) if min_text else stats.minimumValue
-        max_val = float(max_text) if max_text else stats.maximumValue
-
-        #Validar que min<max
-        if min_val >= max_val:
-            self.iface.messageBar().pushMessage(
-                "Error",
-                "Min debe ser menor que Max",
-                level=2, #mensaje de error
-                duration=3
-            )
-            return
-
-        # Crear color ramp (viridis simple, rojo, verde, azul)
-        color_ramp = QgsColorRampShader()
-        color_ramp.setColorRampType(QgsColorRampShader.Interpolated)
-
-        #Definir cómo mapear los valores (colores) según esquema escogido por usuario
-        #viridis (paleta secuencial, de oscuro a claro)
-        if ramp_type == "viridis":
-            items = [
-                QgsColorRampShader.ColorRampItem(min_val, QColor(68, 1, 84)), #valores bajos oscuros (morado oscuro)
-                QgsColorRampShader.ColorRampItem((min_val + max_val) / 2, QColor(32, 144, 140)), #valores medios un poco más claros (verde/azul)
-                QgsColorRampShader.ColorRampItem(max_val, QColor(253, 231, 37)), #valores altos claros (amarillo)
-            ]
-        #RdYlGn (esquema divergente tipo semáforo (rojo-> amarillo -> verde))
-        elif ramp_type == "RdYlGn":
-            items = [
-                QgsColorRampShader.ColorRampItem(min_val, QColor(165, 0, 38)), #valores bajos o críticos rojo
-                QgsColorRampShader.ColorRampItem((min_val + max_val) / 2, QColor(255, 255, 191)), #valores medios amarillo
-                QgsColorRampShader.ColorRampItem(max_val, QColor(0, 104, 55)), #valores altos o favorables verde
-            ]
-
-        color_ramp.setColorRampItemList(items)
-
-        #Aplicar la lógica del color ramp
-        shader = QgsRasterShader()
-        shader.setRasterShaderFunction(color_ramp)
-
-        #Mostrar la banda seleccionada con estos colores
-        renderer = QgsSingleBandPseudoColorRenderer(provider, band, shader)
-
-        # Crear nueva capa para no modificar original
-        new_layer = layer.clone()
-        new_layer.setRenderer(renderer)
-        new_layer.setName(f"{layer.name()}_{ramp_type}")
-
-        #Mostrar en QGIS, en el panel de capas
-        QgsProject.instance().addMapLayer(new_layer)
-
-
-
     def run(self):
-        """Run method that performs all the real work"""
-
-        # Create the dialog with elements (after translation) and keep reference
-        # Only create GUI ONCE in callback, so that it will only load when the plugin is started
-        #self.dlg = GeoGlyphDialog(self.iface)
-
-        # show the dialog
-        #self.dlg.show()
-        # Run the dialog event loop
-        #result = self.dlg.exec_()
-        # See if OK was pressed
-        #if result:
-            # Do something useful here - delete the line containing pass and
-            # substitute with your code.
-        #    pass
-
         """Muestra/oculta el panel lateral."""
         if self.panel is not None:
             self.panel.setVisible(not self.panel.isVisible())
+
+    # ── TIGS-42: Comunicación HTTP asíncrona ──────────────────────────────────
+
+    def _ejecutar_inferencia(self):
+        """
+        Lanza EnhanceWorker en un QThread para llamar POST /enhance
+        sin bloquear el hilo principal de QGIS.
+        """
+        # Evitar doble-click mientras hay una llamada en curso
+        if self._worker is not None and self._worker.isRunning():
+            return
+
+        self.panel.btn_inferencia.setEnabled(False)
+        self.panel.lbl_status.setText("Estado: Conectando con backend...")
+        self.panel.lbl_status.setStyleSheet(
+            "color: orange; font-size: 10px; margin-left: 4px;"
+        )
+
+        # bbox placeholder — en iteraciones futuras vendrá del ROI seleccionado en QGIS
+        self._worker = EnhanceWorker(bbox=[0, 0, 256, 256], band=1)
+        self._worker.finished.connect(self._on_inferencia_ok)
+        self._worker.error.connect(self._on_inferencia_error)
+        self._worker.start()
+
+    def _on_inferencia_ok(self, status_code, elapsed, body):
+        """Callback ejecutado en el hilo principal cuando el worker termina bien."""
+        proc_ms = body.get("processing_time_ms", "—")
+        self.panel.lbl_status.setText(
+            f"Estado: HTTP {status_code} · {elapsed:.2f}s · backend: {proc_ms}ms"
+        )
+        self.panel.lbl_status.setStyleSheet(
+            "color: green; font-size: 10px; margin-left: 4px;"
+        )
+        self.panel.btn_inferencia.setEnabled(True)
+
+    def _on_inferencia_error(self, msg):
+        """Callback ejecutado en el hilo principal cuando el worker falla."""
+        self.panel.lbl_status.setText(f"Error: {msg}")
+        self.panel.lbl_status.setStyleSheet(
+            "color: red; font-size: 10px; margin-left: 4px;"
+        )
+        self.panel.btn_inferencia.setEnabled(True)
