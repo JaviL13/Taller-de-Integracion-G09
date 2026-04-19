@@ -92,6 +92,7 @@ class GeoGlyph:
 
         # Conexiones de botones
         self.panel.btn_abrir_tiff.clicked.connect(self.abrir_geotiff)
+        self.panel.btn_exportar.clicked.connect(self.exportar_capa_realzada)
         self.panel.btn_inferencia.clicked.connect(self._ejecutar_inferencia)  # ← nuevo
 
         # Conectar el botón "Aplicar Color Ramp" del panel
@@ -230,6 +231,63 @@ class GeoGlyph:
 
         #Mostrar en QGIS, en el panel de capas
         QgsProject.instance().addMapLayer(new_layer)
+
+    def exportar_capa_realzada(self):
+        from qgis.core import QgsRasterFileWriter, QgsRasterPipe      # Herramientas para escribir ráster a disco
+        from qgis.PyQt.QtWidgets import QFileDialog                   # Ventana de escritorio para guardar archivos
+
+        layer = self.iface.activeLayer()                              # Obtener la capa activa en QGIS
+
+        # Si no hay capa activa, mostrar error y salir
+        if layer is None:
+            self.iface.messageBar().pushMessage("Error", "No hay capa activa para exportar", level=2)
+            return
+
+        # Abrir ventana de "documentos" para que el usuario elija dónde quiere guardar el archivo
+        file_path, _ = QFileDialog.getSaveFileName(
+            None,
+            "Guardar capa realzada como GeoTIFF",
+            "",                                                       # El archivo no tine nombre predeterminado
+            "GeoTIFF (*.tif *.tiff)"
+        )
+
+        # Si el usuario apreta "Cancelar", salir sin hacer nada
+        if not file_path:
+            return
+
+        # Proveedor es el que tiene acceso a los  datos reales de la capa
+        provider = layer.dataProvider()
+
+        # El pipe es por donde pasan esos datos desde el proveedor hasta el archivo que se va a guardar
+        pipe = QgsRasterPipe()
+
+        # Cargar el proveedor en el pipe, si falla mostrar error
+        if not pipe.set(provider.clone()):
+            self.iface.messageBar().pushMessage("Error", "No se pudo preparar la capa para exportar", level=2)
+            return
+
+        # Insertar el renderer en el pipe para que el GeoTIFF exportado tenga los colores del realce aplicado
+        renderer = layer.renderer()
+        if renderer:
+            pipe.set(renderer.clone())
+
+        writer = QgsRasterFileWriter(file_path)      # Escribe los datos al archivo en disco
+        writer.setOutputFormat("GTiff")              # Le da el formato
+
+        # Escribir el archivo conservando el CRS y extensión espacial original      
+        error = writer.writeRaster(
+            pipe,
+            provider.xSize(),                        # Ancho en píxeles
+            provider.ySize(),                        # Alto en píxeles
+            layer.extent(),                          # Área geográfica que cubre la imagen
+            layer.crs()                              # Sistema de coordenadas
+        )
+
+        # QgsRasterFileWriter.NoError es el código de éxito
+        if error == QgsRasterFileWriter.NoError:
+            self.iface.messageBar().pushMessage("Éxito", f"Capa exportada correctamente: {file_path}", level=0)
+        else:
+            self.iface.messageBar().pushMessage("Error", "No se pudo exportar la capa", level=2)
 
     def run(self):
         """Muestra/oculta el panel lateral."""
