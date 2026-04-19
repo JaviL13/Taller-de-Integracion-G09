@@ -28,7 +28,7 @@ from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
 
 
-from qgis.core import QgsRasterLayer, QgsProject
+from qgis.core import QgsRasterLayer, QgsProject #Esto para agregar la imagen raster y el proyecto abierto, para cargar las imágenes y agregar capas.
 
 # This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
@@ -36,8 +36,8 @@ FORM_CLASS, _ = uic.loadUiType(os.path.join(
 
 
 class GeoGlyphDialog(QtWidgets.QDialog, FORM_CLASS):
-    def __init__(self, iface, parent=None):
-        """Constructor."""
+    def __init__(self, iface, parent=None): #iface es para que el diálogo pueda recibir la interfaz desde afuera
+        #Constructor
         super(GeoGlyphDialog, self).__init__(parent)
         # Set up the user interface from Designer through FORM_CLASS.
         # After self.setupUi() you can access any designer object by doing
@@ -47,7 +47,7 @@ class GeoGlyphDialog(QtWidgets.QDialog, FORM_CLASS):
         self.setupUi(self)
         self.iface = iface
 
-        if self.layout() is None:
+        if self.layout() is None: #Crea el layout si no existe
             from qgis.PyQt.QtWidgets import QVBoxLayout
             layout = QVBoxLayout()
             self.setLayout(layout)

@@ -21,7 +21,7 @@
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt
+from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt 
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 
@@ -29,7 +29,7 @@ from qgis.PyQt.QtWidgets import QAction
 from .resources import *
 # Import the code for the dialog
 from .geoglyph_dialog import GeoGlyphDialog
-from .geoglyph_panel import GeoGlyphPanel
+from .geoglyph_panel import GeoGlyphPanel #Se importa el panel con los botones
 import os.path
 
 
@@ -63,7 +63,7 @@ class GeoGlyph:
         # Declare instance attributes
         self.actions = []
         self.menu = self.tr(u'&GeoGlyph')
-        self.panel = None
+        self.panel = None #Se inicializa el panel
 
         # Check if plugin was started the first time in current QGIS session
         # Must be set in initGui() to survive plugin reloads
@@ -178,7 +178,7 @@ class GeoGlyph:
         # Conectar el botón "Abrir GeoTIFF" del panel al diálogo existente
         self.panel.btn_abrir_tiff.clicked.connect(self.abrir_geotiff)
 
-        # Agregar el panel a QGIS (lado derecho por defecto)
+        # Agregar el panel a QGIS (lado derecho)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
 
 
@@ -190,17 +190,17 @@ class GeoGlyph:
                 action)
             self.iface.removeToolBarIcon(action)
         
-        if self.panel is not None:
+        if self.panel is not None: 
             self.iface.removeDockWidget(self.panel)
             self.panel = None
 
     def abrir_geotiff(self):
-        """Abre el diálogo para cargar un GeoTIFF."""
+        #Abre el diálogo para cargar un archivo TIFF
         dlg = GeoGlyphDialog(self.iface)
         dlg.exec_()
 
     def run(self):
-        """Run method that performs all the real work"""
+        #"""Run method that performs all the real work"""
 
         # Create the dialog with elements (after translation) and keep reference
         # Only create GUI ONCE in callback, so that it will only load when the plugin is started
@@ -216,6 +216,6 @@ class GeoGlyph:
             # substitute with your code.
         #    pass
 
-        """Muestra/oculta el panel lateral."""
+        #Muestra u oculta el panel lateral.
         if self.panel is not None:
             self.panel.setVisible(not self.panel.isVisible())
