@@ -79,10 +79,10 @@ class GeoGlyphPanel(QDockWidget):
         btn_importar.setEnabled(False)
         layout.addWidget(btn_importar)
 
-        btn_exportar = QPushButton("Exportar anotaciones")
-        btn_exportar.setToolTip("Exporta las anotaciones validadas como GeoJSON (próximamente)")
-        btn_exportar.setEnabled(False)
-        layout.addWidget(btn_exportar)
+        self.btn_exportar = QPushButton("Exportar Capa Realzada")                           # Exportar la capa realzada como GeoTIFF
+        self.btn_exportar.setToolTip("Guarda la capa realzada activa como archivo GeoTIFF") # Tooltip que explica qué hace el botón
+        self.btn_exportar.setEnabled(True)                                                  # Habilitado para hacerle clic
+        layout.addWidget(self.btn_exportar)
 
         layout.addWidget(self._separador())
 
