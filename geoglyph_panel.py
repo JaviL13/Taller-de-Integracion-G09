@@ -2,7 +2,8 @@
 import os
 from qgis.PyQt.QtWidgets import (
     QDockWidget, QWidget, QVBoxLayout,
-    QPushButton, QLabel, QFrame, QSizePolicy
+    QPushButton, QLabel, QFrame, QSizePolicy, QComboBox,
+    QLineEdit
 )
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtGui import QIcon
@@ -35,10 +36,28 @@ class GeoGlyphPanel(QDockWidget):
         # Sección: Realce Visual
         layout.addWidget(self._seccion_titulo(" Realce visual"))
 
-        btn_color_ramp = QPushButton("Aplicar Color Ramp")
-        btn_color_ramp.setToolTip("Aplica una rampa de color para realce arqueológico (próximamente)")
-        btn_color_ramp.setEnabled(False)
-        layout.addWidget(btn_color_ramp)
+        #Color Ramp
+        self.btn_color_ramp = QPushButton("Aplicar Color Ramp")
+        self.btn_color_ramp.setToolTip("Aplica una rampa de color para realce arqueológico")
+        self.btn_color_ramp.setEnabled(True)
+        layout.addWidget(self.btn_color_ramp)
+        #Escoger banda
+        layout.addWidget(QLabel("Banda:"))
+        self.combo_band = QComboBox()
+        layout.addWidget(self.combo_band)
+        #Opciones esquemas de colores
+        layout.addWidget(QLabel("Esquema de color:"))
+        self.combo_color_ramp = QComboBox()
+        self.combo_color_ramp.addItems(["viridis", "RdYlGn"])
+        layout.addWidget(self.combo_color_ramp)
+        #Estiramiento de contraste
+        layout.addWidget(self._seccion_titulo(" Estiramiento de contraste (Min/Max)"))
+        self.input_min = QLineEdit()
+        self.input_min.setPlaceholderText("Auto")
+        layout.addWidget(self.input_min)
+        self.input_max = QLineEdit()
+        self.input_max.setPlaceholderText("Auto")
+        layout.addWidget(self.input_max)
 
         btn_decorrelation = QPushButton("Decorrelation Stretch")
         btn_decorrelation.setToolTip("Realce por decorrelación espectral (próximamente)")
