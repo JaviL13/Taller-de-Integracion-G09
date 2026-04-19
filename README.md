@@ -182,7 +182,7 @@ El pipeline se activa automáticamente en cada `push` y `pull_request` a las ram
 ## Arquitectura
 ```
 ┌─────────────────────────────────────┐
-│           QGIS (Frontend GIS)        │
+│           QGIS (Frontend GIS)       │
 │  ┌──────────────────────────────┐   │
 │  │     GeoGlyph Plugin (PyQGIS) │   │
 │  │  - Panel de anotación        │   │
@@ -238,3 +238,23 @@ Desarrollado para **CENIA** (Centro Nacional de Inteligencia Artificial) en cola
 ## Licencia
 
 Proyecto académico desarrollado con fines de investigación. Los datos arqueológicos utilizados son propiedad de las instituciones participantes y no se distribuyen públicamente.
+
+---
+
+## Testing 
+
+### Correr Tests Localmente
+
+Instala las dependencias de testing antes de correr los tests por primera vez:
+```bash
+pip install pytest pytest-cov rasterio numpy
+```
+
+Si se quiere correr todos los test:
+```bash
+pytest -v --cov=. --cov-report=term-missing
+```
+
+Si se quiere correr solo los test de TIGS-35: 
+```bash
+pytest tests/test_tigs35.py -v --cov=. --cov-report=term-missing
