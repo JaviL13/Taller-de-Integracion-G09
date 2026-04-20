@@ -59,10 +59,11 @@ class GeoGlyphPanel(QDockWidget):
         self.input_max.setPlaceholderText("Auto")
         layout.addWidget(self.input_max)
 
-        btn_decorrelation = QPushButton("Decorrelation Stretch")
-        btn_decorrelation.setToolTip("Realce por decorrelación espectral (próximamente)")
-        btn_decorrelation.setEnabled(False)
-        layout.addWidget(btn_decorrelation)
+        self.btn_decorrelation = QPushButton("Decorrelation Stretch")
+        self.btn_decorrelation.setToolTip(
+            "Aplica decorrelation stretch (PCA sobre 3 bandas) al raster seleccionado"
+        )
+        layout.addWidget(self.btn_decorrelation)
 
         btn_side_by_side = QPushButton("Vista Side-by-Side")
         btn_side_by_side.setToolTip("Compara dos configuraciones de visualización en paralelo (próximamente)")

@@ -30,6 +30,7 @@ from .resources import *
 from .geoglyph_dialog import GeoGlyphDialog
 from .geoglyph_panel import GeoGlyphPanel
 from .http_worker import EnhanceWorker  # ← nuevo en TIGS-42
+from .decorrelation_dialog import DecorrelationStretchDialog
 import os.path
 
 
@@ -101,6 +102,10 @@ class GeoGlyph:
         #Modificar número de bandas según capa seleccionada
         self.iface.layerTreeView().selectionModel().selectionChanged.connect(self.cargar_bandas)
 
+        # Conectar el botón "Decorrelation Stretch"
+        self.panel.btn_decorrelation.clicked.connect(self.abrir_decorrelation_stretch)
+
+        # Agregar el panel a QGIS (lado derecho por defecto)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
 
     def unload(self):
@@ -288,6 +293,10 @@ class GeoGlyph:
             self.iface.messageBar().pushMessage("Éxito", f"Capa exportada correctamente: {file_path}", level=0)
         else:
             self.iface.messageBar().pushMessage("Error", "No se pudo exportar la capa", level=2)
+    def abrir_decorrelation_stretch(self):
+        """Abre el diálogo para aplicar decorrelation stretch (PCA sobre 3 bandas)."""
+        dlg = DecorrelationStretchDialog(self.iface, parent=self.iface.mainWindow())
+        dlg.exec_()
 
     def run(self):
         """Muestra/oculta el panel lateral."""
