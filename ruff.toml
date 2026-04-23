@@ -1,0 +1,40 @@
+line-length = 120
+target-version = "py38"
+
+[lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E402",  # module-level import not at top (Qt imports in PyQGIS require deferred loading)
+    "W191",  # indentation contains tabs
+    "E101",  # indentation contains mixed spaces and tabs
+    "E117",  # over-indented
+    # Comentarios
+    "E262",  # inline comment should start with '# '
+    "E265",  # block comment should start with '# '
+    "E266",  # too many leading '#' for block comment
+    # Espacios
+    "E203",  # whitespace before ':'
+    "E221",  # multiple spaces before operator
+    "E241",  # multiple spaces after ','
+    "E251",  # unexpected spaces around keyword / parameter equals
+    "E261",  # at least two spaces before inline comment
+    "W291",  # trailing whitespace
+    "W293",  # whitespace before comment
+    # Saltos de línea y líneas en blanco
+    "E301",  # expected 1 blank line
+    "E302",  # expected 2 blank lines
+    "E303",  # too many blank lines
+    "E304",  # defs that immediately follow docstrings
+    "E305",  # expected 2 blank lines after class or function definition
+    "W391",  # blank line at end of file
+    "W292",  # no newline at end of file
+]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401", "E402"]  # Qt/QGIS classFactory pattern
+"resources.py" = ["F401"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
