@@ -25,12 +25,16 @@
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
+from qgis.core import QgsRasterLayer
 
 from .resources import *
 from .geoglyph_dialog import GeoGlyphDialog
-from .geoglyph_panel import GeoGlyphPanel
+from .geoglyph_panel import GeoGlyphPanel #Se importa el panel con los botones
 from .http_worker import EnhanceWorker  # ← nuevo en TIGS-42
 from .decorrelation_dialog import DecorrelationStretchDialog
+from .annotation_tool import PolygonDrawTool #Se importa para crear los dibujos
+from .annotation_manager import AnnotationManager
+
 import os.path
 
 
@@ -53,6 +57,8 @@ class GeoGlyph:
         self.menu = self.tr(u'&GeoGlyph')
         self.panel = None
         self._worker = None  # referencia al worker activo (evita GC prematuro)
+        self._draw_tool = None #Para la funcionalidad de dibujo
+        self._annotation_manager = None #Para la funcionalidad de dibujo
 
     def tr(self, message):
         return QCoreApplication.translate('GeoGlyph', message)
@@ -80,7 +86,7 @@ class GeoGlyph:
         return action
 
     def initGui(self):
-        """Crea entradas de menú, toolbar y panel lateral."""
+        #Crea entradas de menú, toolbar y panel lateral.
         icon_path = ':/plugins/geoglyph/icon.png'
         self.add_action(
             icon_path,
@@ -88,7 +94,7 @@ class GeoGlyph:
             callback=self.run,
             parent=self.iface.mainWindow()
         )
-
+        # Crear y registrar el panel lateral
         self.panel = GeoGlyphPanel(self.iface, self.iface.mainWindow())
 
         # Conexiones de botones
@@ -105,8 +111,13 @@ class GeoGlyph:
         # Conectar el botón "Decorrelation Stretch"
         self.panel.btn_decorrelation.clicked.connect(self.abrir_decorrelation_stretch)
 
+        #Botón para dibujar
+        self.panel.btn_dibujar.clicked.connect(self._activar_herramienta_dibujo)
+
         # Agregar el panel a QGIS (lado derecho por defecto)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
+
+        
 
     def unload(self):
         """Elimina el plugin del menú y toolbar de QGIS."""
@@ -124,7 +135,7 @@ class GeoGlyph:
             self._worker.wait()
 
     def abrir_geotiff(self):
-        """Abre el diálogo para cargar un GeoTIFF."""
+        #Abre el diálogo para cargar un GeoTIFF
         dlg = GeoGlyphDialog(self.iface)
         dlg.exec_()
 
@@ -135,6 +146,11 @@ class GeoGlyph:
             return
 
         layer = layers[0]
+
+        # Solo procesar capas raster, ignorar vectoriales
+        
+        if not isinstance(layer, QgsRasterLayer):
+            return
         provider = layer.dataProvider()
 
         #Obtener número de bandas
@@ -299,7 +315,7 @@ class GeoGlyph:
         dlg.exec_()
 
     def run(self):
-        """Muestra/oculta el panel lateral."""
+        #Muestra u oculta el panel lateral.
         if self.panel is not None:
             self.panel.setVisible(not self.panel.isVisible())
 
@@ -344,3 +360,43 @@ class GeoGlyph:
             "color: red; font-size: 10px; margin-left: 4px;"
         )
         self.panel.btn_inferencia.setEnabled(True)
+
+
+    def _activar_herramienta_dibujo(self):
+        #Activa la herramienta de dibujo de polígonos en el canvas
+        canvas = self.iface.mapCanvas()
+
+        # Inicializar el manager si no existe aún
+        if self._annotation_manager is None:
+            crs = canvas.mapSettings().destinationCrs()
+            gpkg_path = os.path.join(
+                os.path.dirname(__file__), "annotations.gpkg"
+            )
+            self._annotation_manager = AnnotationManager(gpkg_path, crs)
+
+        # Crear y activar la herramienta de dibujo
+        self._draw_tool = PolygonDrawTool(canvas, self._on_poligono_dibujado, self.iface)
+        canvas.setMapTool(self._draw_tool)
+
+        self.iface.messageBar().pushMessage(
+            "GeoGlyph",
+            "Clic izquierdo: agregar vértice | Clic derecho: cerrar polígono | Escape: cancelar",
+            level=0,
+            duration=5
+        )
+
+    def _on_poligono_dibujado(self, geometry):
+        #Callback que recibe el polígono terminado y lo guarda.
+        if self._annotation_manager is None:
+            return
+
+        feature = self._annotation_manager.agregar_anotacion(geometry)
+        self.iface.messageBar().pushMessage(
+            "GeoGlyph",
+            f"Anotación guardada — estado: pending | origen: human",
+            level=0,
+            duration=3
+        )
+
+        # Volver a la herramienta de navegación normal
+        self.iface.mapCanvas().unsetMapTool(self._draw_tool)
