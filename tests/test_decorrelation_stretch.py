@@ -144,10 +144,12 @@ def test_regularization_caps_stretch_matrix_norm():
     X = primary + noise + np.array([128.0, 128.0, 128.0], dtype=np.float32)
 
     params_raw = _fit_stretch_params(X, saturation_pct=0.0, regularization=0.0)
-    params_reg = _fit_stretch_params(X, saturation_pct=0.0, regularization=0.05)
+    params_reg = _fit_stretch_params(
+        X, saturation_pct=0.0, regularization=0.05)
 
     # La norma Frobenius de M mide "cuánto estira en total" la transformación.
-    # Con regularización, los ejes chicos se estiran menos → M tiene norma menor.
+    # Con regularización, los ejes chicos se estiran menos → M tiene norma
+    # menor.
     norm_raw = float(np.linalg.norm(params_raw["M"]))
     norm_reg = float(np.linalg.norm(params_reg["M"]))
 
@@ -158,7 +160,7 @@ def test_regularization_caps_stretch_matrix_norm():
     # Además, con regularización la matriz debe estar mejor condicionada
     # (autovalores más parejos tras el inverso).
     cond_raw = params_raw["eigvals"].max() / params_raw["eigvals"].min()
-    cond_reg = params_reg["eigvals"].max() / params_reg["eigvals"].min()
+    # cond_reg = params_reg["eigvals"].max() / params_reg["eigvals"].min()
     # La regularización no cambia los eigvals originales que guardamos en
     # params, pero sí cambia el factor k/√λ usado internamente — este assert
     # sirve como sanity check de que el cigarro es realmente un cigarro.
@@ -207,9 +209,9 @@ def test_tiled_application_matches_full_image():
         for x in range(0, W, tile_size):
             th = min(tile_size, H - y)
             tw = min(tile_size, W - x)
-            tile = img[y : y + th, x : x + tw, :]
+            tile = img[y: y + th, x: x + tw, :]
             out_tile = _apply_stretch_params(tile, params, saturation_pct=1.0)
-            tiled[y : y + th, x : x + tw, :] = out_tile
+            tiled[y: y + th, x: x + tw, :] = out_tile
 
     assert np.array_equal(full, tiled)
 
@@ -233,7 +235,8 @@ def test_bilateral_numpy_reduces_noise_in_flat_region():
     noise = rng.normal(0, 10.0, size=(80, 80, 3)).astype(np.float32)
     img = np.clip(base + noise, 0, 255).astype(np.uint8)
 
-    filtered = _bilateral_filter_numpy(img, d=7, sigma_color=25.0, sigma_space=7.0)
+    filtered = _bilateral_filter_numpy(
+        img, d=7, sigma_color=25.0, sigma_space=7.0)
 
     var_before = img.astype(np.float32).var(axis=(0, 1)).mean()
     var_after = filtered.astype(np.float32).var(axis=(0, 1)).mean()

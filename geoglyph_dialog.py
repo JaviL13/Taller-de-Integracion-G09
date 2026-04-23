@@ -30,7 +30,8 @@ from qgis.PyQt import QtWidgets
 
 from qgis.core import QgsRasterLayer, QgsProject
 
-# This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
+# This loads your .ui file so that PyQt can populate your plugin with the
+# elements from Qt Designer
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
     os.path.dirname(__file__), 'geoglyph_dialog_base.ui'))
 
@@ -51,7 +52,7 @@ class GeoGlyphDialog(QtWidgets.QDialog, FORM_CLASS):
             from qgis.PyQt.QtWidgets import QVBoxLayout
             layout = QVBoxLayout()
             self.setLayout(layout)
-        
+
         # Crear el botón "Abrir GeoTIFF"
         self.btn_open_tiff = QtWidgets.QPushButton("Abrir GeoTIFF", self)
         self.btn_open_tiff.clicked.connect(self.open_geotiff)

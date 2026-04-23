@@ -1,25 +1,26 @@
 # -*- coding: utf-8 -*-
-import os
+# import os
 from qgis.PyQt.QtWidgets import (
     QDockWidget, QWidget, QVBoxLayout,
-    QPushButton, QLabel, QFrame, QSizePolicy, QComboBox,
+    QPushButton, QLabel, QFrame, QComboBox,
     QLineEdit
 )
 from qgis.PyQt.QtCore import Qt
-from qgis.PyQt.QtGui import QIcon
 
 
 class GeoGlyphPanel(QDockWidget):
-    #Panel lateral acoplable de GeoGlyph
+    # Panel lateral acoplable de GeoGlyph
 
     def __init__(self, iface, parent=None):
         super(GeoGlyphPanel, self).__init__("GeoGlyph", parent)
         self.iface = iface
         self.setObjectName("GeoGlyphPanel")
-        #Le da un nombre único al panel. QGIS usa este nombre para recordar la posición del panel entre sesiones (si se mueve a la izquierda, la próxima vez aparece en la izquierda)
+        # Le da un nombre único al panel. QGIS usa este nombre para recordar la
+        # posición del panel entre sesiones (si se mueve a la izquierda, la
+        # próxima vez aparece en la izquierda)
 
         # Widget contenedor principal
-        #No se pueden poner botones por separado, por eso un widget contenedor
+        # No se pueden poner botones por separado, por eso un widget contenedor
         container = QWidget()
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignTop)
@@ -50,19 +51,19 @@ class GeoGlyphPanel(QDockWidget):
         self.btn_apply.setToolTip("Aplica el método de realce seleccionado")
         layout.addWidget(self.btn_apply)
 
-        #Color Ramp (Opciones si se escoge este realce)
+        # Color Ramp (Opciones si se escoge este realce)
         self.color_ramp_container = QWidget()
         color_layout = QVBoxLayout()
-        #Escoger banda
+        # Escoger banda
         color_layout.addWidget(QLabel("Banda:"))
         self.combo_band = QComboBox()
         color_layout.addWidget(self.combo_band)
-        #Opciones esquemas de colores
+        # Opciones esquemas de colores
         color_layout.addWidget(QLabel("Esquema de color:"))
         self.combo_color_ramp = QComboBox()
         self.combo_color_ramp.addItems(["viridis", "RdYlGn"])
         color_layout.addWidget(self.combo_color_ramp)
-        #Estiramiento de contraste
+        # Estiramiento de contraste
         color_layout.addWidget(QLabel("Estiramiento de contraste (Min/Max)"))
         self.input_min = QLineEdit()
         self.input_min.setPlaceholderText("Auto")
@@ -75,7 +76,8 @@ class GeoGlyphPanel(QDockWidget):
         self.toggle_ui()
 
         btn_side_by_side = QPushButton("Vista Side-by-Side")
-        btn_side_by_side.setToolTip("Compara dos configuraciones de visualización en paralelo (próximamente)")
+        btn_side_by_side.setToolTip(
+            "Compara dos configuraciones de visualización en paralelo (próximamente)")
         btn_side_by_side.setEnabled(False)
         layout.addWidget(btn_side_by_side)
 
@@ -84,23 +86,28 @@ class GeoGlyphPanel(QDockWidget):
         # Anotaciones
         layout.addWidget(self._seccion_titulo(" Anotaciones"))
 
-        #Botón para dibujar el polígono
+        # Botón para dibujar el polígono
         self.btn_dibujar = QPushButton("Dibujar polígono")
         self.btn_dibujar.setToolTip(
-            "Activa la herramienta de dibujo: " \
+            "Activa la herramienta de dibujo: "
             "clic izquierdo agrega vértices, "
             "clic derecho cierra el polígono"
         )
         layout.addWidget(self.btn_dibujar)
 
         btn_importar = QPushButton("Importar detecciones")
-        btn_importar.setToolTip("Importa detecciones en formato GeoJSON o probability map TIFF (próximamente)")
+        btn_importar.setToolTip(
+            "Importa detecciones en formato GeoJSON o probability map TIFF (próximamente)")
         btn_importar.setEnabled(False)
         layout.addWidget(btn_importar)
 
-        self.btn_exportar = QPushButton("Exportar Capa Realzada")                           # Exportar la capa realzada como GeoTIFF
-        self.btn_exportar.setToolTip("Guarda la capa realzada activa como archivo GeoTIFF") # Tooltip que explica qué hace el botón
-        self.btn_exportar.setEnabled(True)                                                  # Habilitado para hacerle clic
+        # Exportar la capa realzada como GeoTIFF
+        self.btn_exportar = QPushButton("Exportar Capa Realzada")
+        # Tooltip que explica qué hace el botón
+        self.btn_exportar.setToolTip(
+            "Guarda la capa realzada activa como archivo GeoTIFF")
+        # Habilitado para hacerle clic
+        self.btn_exportar.setEnabled(True)
         layout.addWidget(self.btn_exportar)
 
         layout.addWidget(self._separador())
@@ -118,7 +125,8 @@ class GeoGlyphPanel(QDockWidget):
         # Label de estado de la última llamada HTTP
         self.lbl_status = QLabel("Estado: —")
         self.lbl_status.setWordWrap(True)
-        self.lbl_status.setStyleSheet("color: gray; font-size: 10px; margin-left: 4px;")
+        self.lbl_status.setStyleSheet(
+            "color: gray; font-size: 10px; margin-left: 4px;")
         layout.addWidget(self.lbl_status)
 
         # Espaciador al final para más orden
@@ -126,18 +134,18 @@ class GeoGlyphPanel(QDockWidget):
         self.setWidget(container)
 
     def _seccion_titulo(self, texto):
-        #Crea una etiqueta de título de sección.
+        # Crea una etiqueta de título de sección.
         label = QLabel(texto)
         label.setStyleSheet("font-weight: bold; margin-top: 6px;")
         return label
 
     def _separador(self):
-        #Crea una línea separadora horizontal
+        # Crea una línea separadora horizontal
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
         line.setFrameShadow(QFrame.Sunken)
         return line
-    
+
     # Muestre u oculte opciones de color ramp
     def toggle_ui(self):
         method = self.combo_enhance.currentText()

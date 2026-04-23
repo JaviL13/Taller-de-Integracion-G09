@@ -51,7 +51,8 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
         self.layer_combo.setFilters(QgsMapLayerProxyModel.RasterLayer)
         layer_layout.addWidget(self.layer_combo)
 
-        self.btn_abrir_tiff = QtWidgets.QPushButton("… o abrir GeoTIFF desde disco")
+        self.btn_abrir_tiff = QtWidgets.QPushButton(
+            "… o abrir GeoTIFF desde disco")
         self.btn_abrir_tiff.clicked.connect(self._open_geotiff)
         layer_layout.addWidget(self.btn_abrir_tiff)
 
@@ -77,13 +78,13 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
         extent_layout = QtWidgets.QVBoxLayout(extent_group)
         self.extent_combo = QtWidgets.QComboBox()
         self.extent_combo.addItem("Vista actual del mapa (rápido)", "canvas")
-        self.extent_combo.addItem("Raster completo (procesamiento por tiles)", "full")
+        self.extent_combo.addItem(
+            "Raster completo (procesamiento por tiles)", "full")
         self.extent_combo.setToolTip(
             "«Vista actual» procesa sólo la región visible en el lienzo de QGIS — "
             "ideal para iteración rápida.\n"
             "«Raster completo» procesa toda la imagen en teselas; la memoria "
-            "queda acotada, así que funciona sobre ortomosaicos grandes."
-        )
+            "queda acotada, así que funciona sobre ortomosaicos grandes.")
         extent_layout.addWidget(self.extent_combo)
         self.extent_info_lbl = QtWidgets.QLabel("")
         self.extent_info_lbl.setStyleSheet("color: #666; font-size: 11px;")
@@ -119,7 +120,8 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
         self.reg_spin.setRange(0.0, 5.0)
         self.reg_spin.setDecimals(2)
         self.reg_spin.setSingleStep(0.5)
-        self.reg_spin.setValue(1.0)  # default 1 % → mitigación suave sin perder detalle
+        # default 1 % → mitigación suave sin perder detalle
+        self.reg_spin.setValue(1.0)
         self.reg_spin.setSuffix(" %")
         self.reg_spin.setToolTip(
             "Regularización del PCA. Acota la amplificación de los ejes con "
@@ -215,8 +217,7 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
         if inter.isEmpty():
             raise RuntimeError(
                 "La vista del mapa no se superpone con la extensión del raster. "
-                "Centra el mapa sobre la imagen antes de aplicar."
-            )
+                "Centra el mapa sobre la imagen antes de aplicar.")
 
         raster_w = layer.width()
         raster_h = layer.height()
@@ -348,11 +349,13 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
 
         out = self.out_edit.text().strip()
         if not out:
-            fd, out = tempfile.mkstemp(suffix="_dstretch.tif", prefix="geoglyph_")
+            fd, out = tempfile.mkstemp(
+                suffix="_dstretch.tif", prefix="geoglyph_")
             os.close(fd)
 
         # UI en modo "procesando"
-        self.status_lbl.setText("Procesando… (esto puede tardar unos segundos)")
+        self.status_lbl.setText(
+            "Procesando… (esto puede tardar unos segundos)")
         self.progress.setValue(0)
         self.progress.setVisible(True)
         self.setCursor(Qt.WaitCursor)
