@@ -119,12 +119,33 @@ mklink /D "%APPDATA%\QGIS\QGIS3\profiles\default\python\plugins\GeoGlyph" "%USER
 2. Busca `GeoGlyph` y activa la casilla
 3. El plugin debería aparecer en **Raster → GeoGlyph**
 
+### 6. Instalar pre-commit (una sola vez)
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Esto configura un hook que ejecuta **ruff** automáticamente antes de cada `git commit`, corrigiendo el formato y reportando problemas de estilo sin necesidad de recordarlo manualmente.
+
+Para correr los hooks manualmente sobre todos los archivos:
+```bash
+pre-commit run --all-files
+```
+
+Para actualizar los hooks a las últimas versiones:
+```bash
+pre-commit autoupdate
+```
+
+---
+
 ### Flujo de trabajo diario
 
 1. Edita los archivos en el repo normalmente
 2. En QGIS, recarga el plugin con **Complementos → Plugin Reloader → Reload Plugin: GeoGlyph**
 3. Los cambios se reflejan sin necesidad de reiniciar QGIS
-4. Cuando el cambio funciona, haz commit y push normalmente
+4. Cuando el cambio funciona, haz commit — pre-commit aplicará ruff automáticamente
 
 ---
 
@@ -171,7 +192,7 @@ El proyecto utiliza **GitHub Actions** con un pipeline de 3 etapas:
 
 | Stage | Herramienta | Descripción |
 |-------|-------------|-------------|
-| `lint` | flake8, pylint | Análisis estático del código Python |
+| `lint` | ruff, pylint | Linting y verificación de formato del código Python |
 | `test` | pytest, pytest-cov | Pruebas unitarias con reporte de cobertura |
 | `build` | zip, importlib | Empaquetado del plugin y verificación de instalación |
 
