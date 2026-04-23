@@ -10,19 +10,22 @@ from qgis.PyQt.QtGui import QIcon
 
 
 class GeoGlyphPanel(QDockWidget):
-    """Panel lateral acoplable de GeoGlyph."""
+    #Panel lateral acoplable de GeoGlyph
 
     def __init__(self, iface, parent=None):
         super(GeoGlyphPanel, self).__init__("GeoGlyph", parent)
         self.iface = iface
         self.setObjectName("GeoGlyphPanel")
+        #Le da un nombre único al panel. QGIS usa este nombre para recordar la posición del panel entre sesiones (si se mueve a la izquierda, la próxima vez aparece en la izquierda)
 
+        # Widget contenedor principal
+        #No se pueden poner botones por separado, por eso un widget contenedor
         container = QWidget()
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignTop)
         container.setLayout(layout)
 
-        # Sección: Cargar GeoTIFF
+        # Cargar GeoTIFF
         layout.addWidget(self._seccion_titulo(" Cargar imagen"))
 
         self.btn_abrir_tiff = QPushButton("Abrir GeoTIFF")
@@ -33,7 +36,7 @@ class GeoGlyphPanel(QDockWidget):
 
         layout.addWidget(self._separador())
 
-        # Sección: Realce Visual
+        # Realce Visual
         layout.addWidget(self._seccion_titulo(" Realce visual"))
 
         # Integración realce, que permita seleccionar color ramp o dStretch
@@ -78,8 +81,17 @@ class GeoGlyphPanel(QDockWidget):
 
         layout.addWidget(self._separador())
 
-        # Sección: Anotaciones
+        # Anotaciones
         layout.addWidget(self._seccion_titulo(" Anotaciones"))
+
+        #Botón para dibujar el polígono
+        self.btn_dibujar = QPushButton("Dibujar polígono")
+        self.btn_dibujar.setToolTip(
+            "Activa la herramienta de dibujo: " \
+            "clic izquierdo agrega vértices, "
+            "clic derecho cierra el polígono"
+        )
+        layout.addWidget(self.btn_dibujar)
 
         btn_importar = QPushButton("Importar detecciones")
         btn_importar.setToolTip("Importa detecciones en formato GeoJSON o probability map TIFF (próximamente)")
@@ -93,7 +105,7 @@ class GeoGlyphPanel(QDockWidget):
 
         layout.addWidget(self._separador())
 
-        # Sección: Inferencia ML
+        # Inferencia ML
         layout.addWidget(self._seccion_titulo(" Inferencia ML"))
 
         self.btn_inferencia = QPushButton("Ejecutar inferencia SAM")
@@ -109,17 +121,18 @@ class GeoGlyphPanel(QDockWidget):
         self.lbl_status.setStyleSheet("color: gray; font-size: 10px; margin-left: 4px;")
         layout.addWidget(self.lbl_status)
 
+        # Espaciador al final para más orden
         layout.addStretch()
         self.setWidget(container)
 
     def _seccion_titulo(self, texto):
-        """Crea una etiqueta de título de sección."""
+        #Crea una etiqueta de título de sección.
         label = QLabel(texto)
         label.setStyleSheet("font-weight: bold; margin-top: 6px;")
         return label
 
     def _separador(self):
-        """Crea una línea separadora horizontal."""
+        #Crea una línea separadora horizontal
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
         line.setFrameShadow(QFrame.Sunken)
