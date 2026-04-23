@@ -36,34 +36,40 @@ class GeoGlyphPanel(QDockWidget):
         # Sección: Realce Visual
         layout.addWidget(self._seccion_titulo(" Realce visual"))
 
-        #Color Ramp
-        self.btn_color_ramp = QPushButton("Aplicar Color Ramp")
-        self.btn_color_ramp.setToolTip("Aplica una rampa de color para realce arqueológico")
-        self.btn_color_ramp.setEnabled(True)
-        layout.addWidget(self.btn_color_ramp)
+        # Integración realce, que permita seleccionar color ramp o dStretch
+        layout.addWidget(QLabel("Tipo de realce:"))
+        self.combo_enhance = QComboBox()
+        self.combo_enhance.addItems(["Color Ramp", "Decorrelation Stretch"])
+        layout.addWidget(self.combo_enhance)
+        self.combo_enhance.currentTextChanged.connect(self.toggle_ui)
+
+        self.btn_apply = QPushButton("Aplicar Realce")
+        self.btn_apply.setToolTip("Aplica el método de realce seleccionado")
+        layout.addWidget(self.btn_apply)
+
+        #Color Ramp (Opciones si se escoge este realce)
+        self.color_ramp_container = QWidget()
+        color_layout = QVBoxLayout()
         #Escoger banda
-        layout.addWidget(QLabel("Banda:"))
+        color_layout.addWidget(QLabel("Banda:"))
         self.combo_band = QComboBox()
-        layout.addWidget(self.combo_band)
+        color_layout.addWidget(self.combo_band)
         #Opciones esquemas de colores
-        layout.addWidget(QLabel("Esquema de color:"))
+        color_layout.addWidget(QLabel("Esquema de color:"))
         self.combo_color_ramp = QComboBox()
         self.combo_color_ramp.addItems(["viridis", "RdYlGn"])
-        layout.addWidget(self.combo_color_ramp)
+        color_layout.addWidget(self.combo_color_ramp)
         #Estiramiento de contraste
-        layout.addWidget(self._seccion_titulo(" Estiramiento de contraste (Min/Max)"))
+        color_layout.addWidget(QLabel("Estiramiento de contraste (Min/Max)"))
         self.input_min = QLineEdit()
         self.input_min.setPlaceholderText("Auto")
-        layout.addWidget(self.input_min)
+        color_layout.addWidget(self.input_min)
         self.input_max = QLineEdit()
         self.input_max.setPlaceholderText("Auto")
-        layout.addWidget(self.input_max)
-
-        self.btn_decorrelation = QPushButton("Decorrelation Stretch")
-        self.btn_decorrelation.setToolTip(
-            "Aplica decorrelation stretch (PCA sobre 3 bandas) al raster seleccionado"
-        )
-        layout.addWidget(self.btn_decorrelation)
+        color_layout.addWidget(self.input_max)
+        self.color_ramp_container.setLayout(color_layout)
+        layout.addWidget(self.color_ramp_container)
+        self.toggle_ui()
 
         btn_side_by_side = QPushButton("Vista Side-by-Side")
         btn_side_by_side.setToolTip("Compara dos configuraciones de visualización en paralelo (próximamente)")
@@ -118,3 +124,12 @@ class GeoGlyphPanel(QDockWidget):
         line.setFrameShape(QFrame.HLine)
         line.setFrameShadow(QFrame.Sunken)
         return line
+    
+    # Muestre u oculte opciones de color ramp
+    def toggle_ui(self):
+        method = self.combo_enhance.currentText()
+
+        if method == "Color Ramp":
+            self.color_ramp_container.setVisible(True)
+        else:
+            self.color_ramp_container.setVisible(False)

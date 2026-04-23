@@ -96,14 +96,11 @@ class GeoGlyph:
         self.panel.btn_exportar.clicked.connect(self.exportar_capa_realzada)
         self.panel.btn_inferencia.clicked.connect(self._ejecutar_inferencia)  # ← nuevo
 
-        # Conectar el botón "Aplicar Color Ramp" del panel
-        self.panel.btn_color_ramp.clicked.connect(self.apply_color_ramp)
+        # Conectar el boton "Aplicar Realce" del panel
+        self.panel.btn_apply.clicked.connect(self.apply_enhancement)
 
         #Modificar número de bandas según capa seleccionada
         self.iface.layerTreeView().selectionModel().selectionChanged.connect(self.cargar_bandas)
-
-        # Conectar el botón "Decorrelation Stretch"
-        self.panel.btn_decorrelation.clicked.connect(self.abrir_decorrelation_stretch)
 
         # Agregar el panel a QGIS (lado derecho por defecto)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
@@ -127,6 +124,16 @@ class GeoGlyph:
         """Abre el diálogo para cargar un GeoTIFF."""
         dlg = GeoGlyphDialog(self.iface)
         dlg.exec_()
+
+    # Boton para aplicar el realce seleccionado
+    def apply_enhancement(self):
+        method = self.panel.combo_enhance.currentText()
+
+        if method == "Color Ramp":
+            self.apply_color_ramp()
+
+        elif method == "Decorrelation Stretch":
+            self.abrir_decorrelation_stretch()
 
     def cargar_bandas(self): #Número de bandas que tiene una capa
         layers = self.iface.layerTreeView().selectedLayers() #capa seleccionada
