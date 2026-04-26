@@ -34,6 +34,7 @@ from .http_worker import EnhanceWorker  # ← nuevo en TIGS-42
 from .decorrelation_dialog import DecorrelationStretchDialog
 from .annotation_tool import PolygonDrawTool  # Se importa para crear los dibujos
 from .annotation_manager import AnnotationManager
+from .annotation_state import StateTransitionError  # ← TIGS-64
 
 import os.path
 
@@ -113,6 +114,10 @@ class GeoGlyph:
         # Botón para dibujar
         self.panel.btn_dibujar.clicked.connect(
             self._activar_herramienta_dibujo)
+
+        # ── TIGS-64: botones aprobar / rechazar ──────────────────────────
+        self.panel.btn_aprobar.clicked.connect(self._aprobar_seleccion)
+        self.panel.btn_rechazar.clicked.connect(self._rechazar_seleccion)
 
         # Agregar el panel a QGIS (lado derecho por defecto)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
@@ -288,6 +293,20 @@ class GeoGlyph:
                 "Error", "No hay capa activa para exportar", level=2)
             return
 
+        # Validar que la capa activa sea raster. Si el usuario dibujó
+        # anotaciones, la capa activa puede ser la vectorial 'annotations'
+        # y QgsVectorDataProvider no tiene .clone(), así que provider.clone()
+        # más abajo crashearía. Mejor avisar con un mensaje claro.
+        if not isinstance(layer, QgsRasterLayer):
+            self.iface.messageBar().pushMessage(
+                "Error",
+                "La capa activa no es raster. Selecciona la capa realzada "
+                "en el panel de capas antes de exportar.",
+                level=2,
+                duration=4,
+            )
+            return
+
         # Abrir ventana de "documentos" para que el usuario elija dónde quiere
         # guardar el archivo
         file_path, _ = QFileDialog.getSaveFileName(
@@ -396,17 +415,38 @@ class GeoGlyph:
         )
         self.panel.btn_inferencia.setEnabled(True)
 
-    def _activar_herramienta_dibujo(self):
-        # Activa la herramienta de dibujo de polígonos en el canvas
-        canvas = self.iface.mapCanvas()
+    def _get_or_create_annotation_manager(self):
+        """Lazy-init del AnnotationManager.
 
-        # Inicializar el manager si no existe aún
+        Se centraliza la creación acá para que dibujar y aprobar/rechazar
+        compartan la misma instancia. La primera vez que se llama, además
+        engancha la señal selectionChanged de la capa para refrescar el
+        estado de los botones aprobar/rechazar (TIGS-64).
+        """
         if self._annotation_manager is None:
+            canvas = self.iface.mapCanvas()
             crs = canvas.mapSettings().destinationCrs()
             gpkg_path = os.path.join(
                 os.path.dirname(__file__), "annotations.gpkg"
             )
             self._annotation_manager = AnnotationManager(gpkg_path, crs)
+
+            # TIGS-64: cuando cambia la selección sobre la capa annotations,
+            # habilitamos/deshabilitamos los botones aprobar/rechazar.
+            self._annotation_manager.layer.selectionChanged.connect(
+                self._on_seleccion_cambiada
+            )
+            # Estado inicial coherente (0 features seleccionados).
+            self._on_seleccion_cambiada()
+
+        return self._annotation_manager
+
+    def _activar_herramienta_dibujo(self):
+        # Activa la herramienta de dibujo de polígonos en el canvas
+        canvas = self.iface.mapCanvas()
+
+        # Inicializar el manager si no existe aún
+        self._get_or_create_annotation_manager()
 
         # Crear y activar la herramienta de dibujo
         self._draw_tool = PolygonDrawTool(
@@ -424,7 +464,10 @@ class GeoGlyph:
         if self._annotation_manager is None:
             return
 
-        # feature = self._annotation_manager.agregar_anotacion(geometry)
+        # TIGS-64: persistir realmente la anotación. Antes este bug dejaba
+        # los polígonos solo en pantalla y no llegaban al .gpkg, así que
+        # tampoco se podían aprobar/rechazar.
+        self._annotation_manager.agregar_anotacion(geometry)
         self.iface.messageBar().pushMessage(
             "GeoGlyph",
             "Anotación guardada — estado: pending | origen: human",
@@ -434,3 +477,83 @@ class GeoGlyph:
 
         # Volver a la herramienta de navegación normal
         self.iface.mapCanvas().unsetMapTool(self._draw_tool)
+
+    # ── TIGS-64: handlers de aprobar / rechazar ────────────────────────────
+
+    def _on_seleccion_cambiada(self, *_args):
+        """Refresca el panel cuando cambia la selección sobre la capa annotations.
+
+        El acepta *_args porque la señal selectionChanged emite varios
+        argumentos (selected, deselected, clearAndSelect) que no nos importan
+        — solo usamos la cuenta actual de features seleccionados.
+        """
+        if self._annotation_manager is None:
+            return
+
+        seleccionados = self._annotation_manager.layer.selectedFeatureCount()
+        habilitar = seleccionados >= 1
+        self.panel.btn_aprobar.setEnabled(habilitar)
+        self.panel.btn_rechazar.setEnabled(habilitar)
+        self.panel.lbl_seleccion.setText(
+            f"Selección actual: {seleccionados} anotaciones"
+        )
+
+    def _aprobar_seleccion(self):
+        self._cambiar_estado_seleccion("approve")
+
+    def _rechazar_seleccion(self):
+        self._cambiar_estado_seleccion("reject")
+
+    def _cambiar_estado_seleccion(self, accion: str):
+        """Aplica aprobar/rechazar a todos los features seleccionados.
+
+        accion: 'approve' o 'reject'. Se centraliza acá la iteración y el
+        manejo de errores para no duplicar código entre los dos handlers.
+        """
+        if self._annotation_manager is None:
+            return
+
+        features = self._annotation_manager.layer.selectedFeatures()
+        if not features:
+            return
+
+        ok_count = 0
+        errores = []
+        for feat in features:
+            try:
+                if accion == "approve":
+                    cambiado = self._annotation_manager.aprobar_anotacion(
+                        feat.id())
+                else:
+                    cambiado = self._annotation_manager.rechazar_anotacion(
+                        feat.id())
+                if cambiado:
+                    ok_count += 1
+            except StateTransitionError as e:
+                # Una transición inválida (p.ej. aprobar algo ya aprobado)
+                # no es fatal: la registramos y seguimos con los demás.
+                errores.append(str(e))
+
+        # Feedback al usuario en la message bar de QGIS
+        if ok_count and not errores:
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                f"{ok_count} anotación(es) actualizadas",
+                level=0,
+                duration=3,
+            )
+        elif ok_count and errores:
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                f"{ok_count} actualizadas, {len(errores)} con error: "
+                f"{errores[0]}",
+                level=1,  # warning
+                duration=4,
+            )
+        else:
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                f"No se pudo actualizar ninguna anotación: {errores[0] if errores else 'razón desconocida'}",
+                level=2,  # error
+                duration=4,
+            )

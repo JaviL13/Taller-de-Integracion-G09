@@ -112,6 +112,38 @@ class GeoGlyphPanel(QDockWidget):
 
         layout.addWidget(self._separador())
 
+        # Estado de anotación (TIGS-64)
+        # Sección que permite aprobar o rechazar la anotación seleccionada
+        # en el mapa. Los botones quedan deshabilitados hasta que el usuario
+        # selecciona al menos un feature en la capa annotations (la
+        # habilitación la maneja geoglyph.py vía la señal selectionChanged).
+        layout.addWidget(self._seccion_titulo(" Estado de anotación"))
+
+        # Label que muestra cuántas anotaciones hay seleccionadas. Sirve de
+        # feedback inmediato para que el usuario sepa por qué los botones
+        # están deshabilitados (porque no hay nada seleccionado).
+        self.lbl_seleccion = QLabel("Selección actual: 0 anotaciones")
+        self.lbl_seleccion.setStyleSheet(
+            "color: gray; font-size: 10px; margin-left: 4px;"
+        )
+        layout.addWidget(self.lbl_seleccion)
+
+        self.btn_aprobar = QPushButton("Aprobar")
+        self.btn_aprobar.setToolTip(
+            "Marca la anotación seleccionada como aprobada (verde)"
+        )
+        self.btn_aprobar.setEnabled(False)
+        layout.addWidget(self.btn_aprobar)
+
+        self.btn_rechazar = QPushButton("Rechazar")
+        self.btn_rechazar.setToolTip(
+            "Marca la anotación seleccionada como rechazada (rojo)"
+        )
+        self.btn_rechazar.setEnabled(False)
+        layout.addWidget(self.btn_rechazar)
+
+        layout.addWidget(self._separador())
+
         # Inferencia ML
         layout.addWidget(self._seccion_titulo(" Inferencia ML"))
 
