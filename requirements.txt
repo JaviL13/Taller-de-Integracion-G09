@@ -4,3 +4,5 @@ pytest
 pytest-cov
 rasterio
 numpy
+fastapi
+httpx
