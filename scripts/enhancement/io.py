@@ -3,10 +3,11 @@
  La función read_geotiff retorna un array 3D (bandas, filas, columnas) y el perfil (metadatos) del archivo.
  La función save_png toma un array RGB uint8 y lo guarda como PNG usando matplotlib.'''
 
-import numpy as np
+# import numpy as np
 import rasterio
 import matplotlib.pyplot as plt
 import os
+
 
 def read_geotiff(path, max_side=4096):
     """Lee un GeoTIFF y retorna el array y el perfil.
@@ -28,8 +29,10 @@ def read_geotiff(path, max_side=4096):
               f"{data.shape[0]} bandas, {data.shape[1]}x{data.shape[2]} px "
               f"(original {h}x{w})")
     else:
-        print(f"GeoTIFF cargado: {data.shape[0]} bandas, {data.shape[1]}x{data.shape[2]} px")
+        print(
+            f"GeoTIFF cargado: {data.shape[0]} bandas, {data.shape[1]}x{data.shape[2]} px")
     return data, profile
+
 
 def save_png(image_array, output_path, title=""):
     """Guarda un array como PNG con matplotlib."""

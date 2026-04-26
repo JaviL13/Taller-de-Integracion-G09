@@ -1,20 +1,21 @@
-# coding: utf-8 
-#Decorrelation Stretch (DStretch) vía PCA para GeoGlyph.
+# coding: utf-8
+# Decorrelation Stretch (DStretch) vía PCA para GeoGlyph.
 
-#Técnica clásica de realce arqueológico (Gillespie et al., 1986) que aumenta el
+# Técnica clásica de realce arqueológico (Gillespie et al., 1986) que aumenta el
 # contraste de color en imágenes con bandas altamente correlacionadas — típico en
-# ortofotos de desiertos donde los geoglifos tienen diferencias cromáticas sutiles.
+# ortofotos de desiertos donde los geoglifos tienen diferencias cromáticas
+# sutiles.
 
-#Procedimiento:
-  #1. Se toman 3 bandas RGB del GeoTIFF de entrada.
-  #2. Se calcula media μ y matriz de covarianza Σ sobre los píxeles válidos.
-  #3. Se descompone Σ = V · Λ · Vᵀ (autovectores/autovalores).
-  #4. Se construye una matriz de estiramiento M = V · diag(k/√λᵢ) · Vᵀ que 
-  # amplifica cada eje principal hasta una desviación común k.
-  #5. Se aplica X' = (X − μ) · M + μ, se recorta por percentil y se escala a 8 bits.
-  #6. Se escribe un nuevo GeoTIFF preservando geotransform, CRS y proyección.
+# Procedimiento:
+# 1. Se toman 3 bandas RGB del GeoTIFF de entrada.
+# 2. Se calcula media μ y matriz de covarianza Σ sobre los píxeles válidos.
+# 3. Se descompone Σ = V · Λ · Vᵀ (autovectores/autovalores).
+# 4. Se construye una matriz de estiramiento M = V · diag(k/√λᵢ) · Vᵀ que
+# amplifica cada eje principal hasta una desviación común k.
+# 5. Se aplica X' = (X − μ) · M + μ, se recorta por percentil y se escala a 8 bits.
+# 6. Se escribe un nuevo GeoTIFF preservando geotransform, CRS y proyección.
 
-#Solo depende de numpy y osgeo.gdal, ambos disponibles en QGIS por defecto.
+# Solo depende de numpy y osgeo.gdal, ambos disponibles en QGIS por defecto.
 
 from __future__ import annotations
 
@@ -100,7 +101,11 @@ def _fit_stretch_params(
     # globales se estiman correctamente desde aquí.
     X_sample_out = (X_sample - mu) @ M + mu
     if saturation_pct > 0:
-        low = np.percentile(X_sample_out, saturation_pct, axis=0).astype(np.float32)
+        low = np.percentile(
+            X_sample_out,
+            saturation_pct,
+            axis=0).astype(
+            np.float32)
         high = np.percentile(
             X_sample_out, 100.0 - saturation_pct, axis=0
         ).astype(np.float32)
@@ -265,14 +270,13 @@ def _bilateral_filter_numpy(
     # esa dirección. Así el loop interno es O(H·W·3), no O(H·W·d²·3).
     for i in range(d):
         for j in range(d):
-            shifted = padded[i : i + H, j : j + W, :]
+            shifted = padded[i: i + H, j: j + W, :]
             diff = shifted - img
             # Suma del cuadrado sobre los 3 canales → distancia de color
             # euclidiana al cuadrado; keepdims para que broadcast con la
             # imagen funcione sin problemas.
-            range_weight = np.exp(
-                -np.sum(diff * diff, axis=2, keepdims=True) / two_sigma_color_sq
-            )
+            range_weight = np.exp(-np.sum(diff * diff,
+                                          axis=2, keepdims=True) / two_sigma_color_sq)
             w = spatial_weights[i, j] * range_weight
             num += shifted * w
             den += w
@@ -481,8 +485,8 @@ def _process_tiled(
 
             # 3. Recortar el halo y escribir sólo el centro (tile "real").
             out_tile = out_padded[
-                top_halo : top_halo + th,
-                left_halo : left_halo + tw,
+                top_halo: top_halo + th,
+                left_halo: left_halo + tw,
                 :,
             ]
 
@@ -578,7 +582,8 @@ def decorrelation_stretch(
 
     band_indices = tuple(int(b) for b in band_indices)
     if len(band_indices) != 3:
-        raise ValueError("Se requieren exactamente 3 bandas para decorrelation stretch.")
+        raise ValueError(
+            "Se requieren exactamente 3 bandas para decorrelation stretch.")
     if saturation_pct < 0 or saturation_pct > 10:
         raise ValueError("saturation_pct debe estar entre 0 y 10.")
     if tile_size < 64:
@@ -604,7 +609,8 @@ def decorrelation_stretch(
         xsize, ysize = full_width, full_height
     else:
         xoff, yoff, xsize, ysize = (int(v) for v in window)
-        # Clampeamos contra los límites del raster para tolerar pequeños excesos
+        # Clampeamos contra los límites del raster para tolerar pequeños
+        # excesos
         xoff = max(0, min(xoff, full_width - 1))
         yoff = max(0, min(yoff, full_height - 1))
         xsize = max(1, min(xsize, full_width - xoff))
@@ -623,7 +629,11 @@ def decorrelation_stretch(
         height,
         3,
         gdal.GDT_Byte,
-        options=["COMPRESS=DEFLATE", "TILED=YES", "PREDICTOR=2", "BIGTIFF=IF_SAFER"],
+        options=[
+            "COMPRESS=DEFLATE",
+            "TILED=YES",
+            "PREDICTOR=2",
+            "BIGTIFF=IF_SAFER"],
     )
     if dst_ds is None:
         raise RuntimeError(f"No se pudo crear el raster de salida: {dst_path}")
@@ -641,7 +651,8 @@ def decorrelation_stretch(
     )
     dst_ds.SetGeoTransform(new_gt)
     dst_ds.SetProjection(ds.GetProjection())
-    # Los GCPs solo tienen sentido sobre el raster entero, no sobre una ventana.
+    # Los GCPs solo tienen sentido sobre el raster entero, no sobre una
+    # ventana.
     if ds.GetGCPCount() > 0 and window is None:
         dst_ds.SetGCPs(ds.GetGCPs(), ds.GetGCPProjection())
 
@@ -689,7 +700,8 @@ def decorrelation_stretch(
     else:
         # Camino en memoria: una sola pasada, lee todo de una. Usamos
         # exactamente el mismo par _fit_stretch_params / _apply_stretch_params
-        # que el camino tiled, para que ambos sean estadísticamente equivalentes.
+        # que el camino tiled, para que ambos sean estadísticamente
+        # equivalentes.
         bands_arr = []
         nodata_masks = []
         for bi in band_indices:
@@ -698,7 +710,9 @@ def decorrelation_stretch(
                 np.float32, copy=False
             )
             nodata = band.GetNoDataValue()
-            mask = (arr == nodata) if nodata is not None else np.zeros_like(arr, dtype=bool)
+            mask = (
+                arr == nodata) if nodata is not None else np.zeros_like(
+                arr, dtype=bool)
             bands_arr.append(arr)
             nodata_masks.append(mask)
 
@@ -711,7 +725,10 @@ def decorrelation_stretch(
         X_valid = X[valid_flat]
         if X_valid.shape[0] > sample_limit:
             rng = np.random.default_rng(42)
-            idx = rng.choice(X_valid.shape[0], size=sample_limit, replace=False)
+            idx = rng.choice(
+                X_valid.shape[0],
+                size=sample_limit,
+                replace=False)
             X_sample = X_valid[idx]
         else:
             X_sample = X_valid
@@ -722,8 +739,10 @@ def decorrelation_stretch(
         )
 
         out = _apply_stretch_params(
-            img, params, nodata_mask=combined_mask, saturation_pct=saturation_pct
-        )
+            img,
+            params,
+            nodata_mask=combined_mask,
+            saturation_pct=saturation_pct)
 
         # Filtro bilateral opcional. En modo in-memory es trivial: filtramos
         # la salida completa y listo — no hay halos ni tiles. Después volvemos

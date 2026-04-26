@@ -24,7 +24,12 @@ class EnhanceWorker(QThread):
 
     TIMEOUT_SECONDS = 30
 
-    def __init__(self, base_url="http://localhost:8000", bbox=None, band=1, parent=None):
+    def __init__(
+            self,
+            base_url="http://localhost:8000",
+            bbox=None,
+            band=1,
+            parent=None):
         super().__init__(parent)
         self.url = f"{base_url}/enhance"
         self.payload = {
@@ -63,7 +68,8 @@ class EnhanceWorker(QThread):
             )
 
         except json.JSONDecodeError:
-            self.error.emit("Respuesta inesperada del backend (no es JSON válido)")
+            self.error.emit(
+                "Respuesta inesperada del backend (no es JSON válido)")
 
         except Exception as e:  # noqa: BLE001
             self.error.emit(f"Error inesperado: {type(e).__name__}: {e}")

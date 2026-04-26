@@ -25,12 +25,16 @@
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
+from qgis.core import QgsRasterLayer
 
-from .resources import *
+from .resources import *  # noqa: F403, F401
 from .geoglyph_dialog import GeoGlyphDialog
-from .geoglyph_panel import GeoGlyphPanel
+from .geoglyph_panel import GeoGlyphPanel  # Se importa el panel con los botones
 from .http_worker import EnhanceWorker  # ← nuevo en TIGS-42
 from .decorrelation_dialog import DecorrelationStretchDialog
+from .annotation_tool import PolygonDrawTool  # Se importa para crear los dibujos
+from .annotation_manager import AnnotationManager
+
 import os.path
 
 
@@ -53,6 +57,8 @@ class GeoGlyph:
         self.menu = self.tr(u'&GeoGlyph')
         self.panel = None
         self._worker = None  # referencia al worker activo (evita GC prematuro)
+        self._draw_tool = None  # Para la funcionalidad de dibujo
+        self._annotation_manager = None  # Para la funcionalidad de dibujo
 
     def tr(self, message):
         return QCoreApplication.translate('GeoGlyph', message)
@@ -80,7 +86,7 @@ class GeoGlyph:
         return action
 
     def initGui(self):
-        """Crea entradas de menú, toolbar y panel lateral."""
+        # Crea entradas de menú, toolbar y panel lateral.
         icon_path = ':/plugins/geoglyph/icon.png'
         self.add_action(
             icon_path,
@@ -88,22 +94,25 @@ class GeoGlyph:
             callback=self.run,
             parent=self.iface.mainWindow()
         )
-
+        # Crear y registrar el panel lateral
         self.panel = GeoGlyphPanel(self.iface, self.iface.mainWindow())
 
         # Conexiones de botones
         self.panel.btn_abrir_tiff.clicked.connect(self.abrir_geotiff)
         self.panel.btn_exportar.clicked.connect(self.exportar_capa_realzada)
-        self.panel.btn_inferencia.clicked.connect(self._ejecutar_inferencia)  # ← nuevo
+        self.panel.btn_inferencia.clicked.connect(
+            self._ejecutar_inferencia)  # ← nuevo
 
-        # Conectar el botón "Aplicar Color Ramp" del panel
-        self.panel.btn_color_ramp.clicked.connect(self.apply_color_ramp)
+        # Conectar el boton "Aplicar Realce" del panel
+        self.panel.btn_apply.clicked.connect(self.apply_enhancement)
 
-        #Modificar número de bandas según capa seleccionada
-        self.iface.layerTreeView().selectionModel().selectionChanged.connect(self.cargar_bandas)
+        # Modificar número de bandas según capa seleccionada
+        self.iface.layerTreeView().selectionModel(
+        ).selectionChanged.connect(self.cargar_bandas)
 
-        # Conectar el botón "Decorrelation Stretch"
-        self.panel.btn_decorrelation.clicked.connect(self.abrir_decorrelation_stretch)
+        # Botón para dibujar
+        self.panel.btn_dibujar.clicked.connect(
+            self._activar_herramienta_dibujo)
 
         # Agregar el panel a QGIS (lado derecho por defecto)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
@@ -124,26 +133,41 @@ class GeoGlyph:
             self._worker.wait()
 
     def abrir_geotiff(self):
-        """Abre el diálogo para cargar un GeoTIFF."""
+        # Abre el diálogo para cargar un GeoTIFF
         dlg = GeoGlyphDialog(self.iface)
         dlg.exec_()
 
-    def cargar_bandas(self): #Número de bandas que tiene una capa
-        layers = self.iface.layerTreeView().selectedLayers() #capa seleccionada
+    # Boton para aplicar el realce seleccionado
+    def apply_enhancement(self):
+        method = self.panel.combo_enhance.currentText()
+
+        if method == "Color Ramp":
+            self.apply_color_ramp()
+
+        elif method == "Decorrelation Stretch":
+            self.abrir_decorrelation_stretch()
+
+    def cargar_bandas(self):  # Número de bandas que tiene una capa
+        layers = self.iface.layerTreeView().selectedLayers()  # capa seleccionada
 
         if not layers:
             return
 
         layer = layers[0]
+
+        # Solo procesar capas raster, ignorar vectoriales
+
+        if not isinstance(layer, QgsRasterLayer):
+            return
         provider = layer.dataProvider()
 
-        #Obtener número de bandas
+        # Obtener número de bandas
         band_count = provider.bandCount()
 
         # Guardar banda actual (si existe)
         current_band = self.panel.combo_band.currentText()
 
-        #Modificar botón lateral
+        # Modificar botón lateral
         self.panel.combo_band.clear()
 
         for i in range(1, band_count + 1):
@@ -156,29 +180,29 @@ class GeoGlyph:
                 self.panel.combo_band.setCurrentIndex(index)
 
     def apply_color_ramp(self):
-        from qgis.core import(
-            QgsRasterShader, #aplica los colores
-            QgsColorRampShader, #define los colores
-            QgsSingleBandPseudoColorRenderer, #muestra los resultados
-            QgsProject, #agrega la capa al mapa
+        from qgis.core import (
+            QgsRasterShader,  # aplica los colores
+            QgsColorRampShader,  # define los colores
+            QgsSingleBandPseudoColorRenderer,  # muestra los resultados
+            QgsProject,  # agrega la capa al mapa
         )
-        from PyQt5.QtGui import QColor #define colores
+        from PyQt5.QtGui import QColor  # define colores
 
-        #Obtener tipo de esquema de color
+        # Obtener tipo de esquema de color
         ramp_type = self.panel.combo_color_ramp.currentText()
-        
-        #Obtener la capa seleccionada en QGIS
+
+        # Obtener la capa seleccionada en QGIS
         layer = self.iface.activeLayer()
 
-        #Evita error si el usuario no seleccionó nada
+        # Evita error si el usuario no seleccionó nada
         if layer is None:
             self.iface.messageBar().pushMessage("Error", "No hay capa activa", level=2)
             return
 
-        #Acceder a los datos del ráster
+        # Acceder a los datos del ráster
         provider = layer.dataProvider()
 
-        #Banda seleccionada por usuario
+        # Banda seleccionada por usuario
         band = int(self.panel.combo_band.currentText())
 
         # Obtener min/max
@@ -190,12 +214,12 @@ class GeoGlyph:
         min_val = float(min_text) if min_text else stats.minimumValue
         max_val = float(max_text) if max_text else stats.maximumValue
 
-        #Validar que min<max
+        # Validar que min<max
         if min_val >= max_val:
             self.iface.messageBar().pushMessage(
                 "Error",
                 "Min debe ser menor que Max",
-                level=2, #mensaje de error
+                level=2,  # mensaje de error
                 duration=3
             )
             return
@@ -204,29 +228,41 @@ class GeoGlyph:
         color_ramp = QgsColorRampShader()
         color_ramp.setColorRampType(QgsColorRampShader.Interpolated)
 
-        #Definir cómo mapear los valores (colores) según esquema escogido por usuario
-        #viridis (paleta secuencial, de oscuro a claro)
+        # Definir cómo mapear los valores (colores) según esquema escogido por usuario
+        # viridis (paleta secuencial, de oscuro a claro)
         if ramp_type == "viridis":
             items = [
-                QgsColorRampShader.ColorRampItem(min_val, QColor(68, 1, 84)), #valores bajos oscuros (morado oscuro)
-                QgsColorRampShader.ColorRampItem((min_val + max_val) / 2, QColor(32, 144, 140)), #valores medios un poco más claros (verde/azul)
-                QgsColorRampShader.ColorRampItem(max_val, QColor(253, 231, 37)), #valores altos claros (amarillo)
+                # valores bajos oscuros (morado oscuro)
+                QgsColorRampShader.ColorRampItem(min_val, QColor(68, 1, 84)),
+                # valores medios un poco más claros (verde/azul)
+                QgsColorRampShader.ColorRampItem(
+                    (min_val + max_val) / 2, QColor(32, 144, 140)),
+                QgsColorRampShader.ColorRampItem(max_val, QColor(
+                    253, 231, 37)),  # valores altos claros (amarillo)
             ]
-        #RdYlGn (esquema divergente tipo semáforo (rojo-> amarillo -> verde))
+        # RdYlGn (esquema divergente tipo semáforo (rojo-> amarillo -> verde))
         elif ramp_type == "RdYlGn":
             items = [
-                QgsColorRampShader.ColorRampItem(min_val, QColor(165, 0, 38)), #valores bajos o críticos rojo
-                QgsColorRampShader.ColorRampItem((min_val + max_val) / 2, QColor(255, 255, 191)), #valores medios amarillo
-                QgsColorRampShader.ColorRampItem(max_val, QColor(0, 104, 55)), #valores altos o favorables verde
+                QgsColorRampShader.ColorRampItem(min_val, QColor(
+                    165, 0, 38)),  # valores bajos o críticos rojo
+                QgsColorRampShader.ColorRampItem(
+                    (min_val + max_val) / 2,
+                    QColor(
+                        255,
+                        255,
+                        191)),
+                # valores medios amarillo
+                QgsColorRampShader.ColorRampItem(max_val, QColor(
+                    0, 104, 55)),  # valores altos o favorables verde
             ]
 
         color_ramp.setColorRampItemList(items)
 
-        #Aplicar la lógica del color ramp
+        # Aplicar la lógica del color ramp
         shader = QgsRasterShader()
         shader.setRasterShaderFunction(color_ramp)
 
-        #Mostrar la banda seleccionada con estos colores
+        # Mostrar la banda seleccionada con estos colores
         renderer = QgsSingleBandPseudoColorRenderer(provider, band, shader)
 
         # Crear nueva capa para no modificar original
@@ -234,25 +270,31 @@ class GeoGlyph:
         new_layer.setRenderer(renderer)
         new_layer.setName(f"{layer.name()}_{ramp_type}")
 
-        #Mostrar en QGIS, en el panel de capas
+        # Mostrar en QGIS, en el panel de capas
         QgsProject.instance().addMapLayer(new_layer)
 
     def exportar_capa_realzada(self):
-        from qgis.core import QgsRasterFileWriter, QgsRasterPipe      # Herramientas para escribir ráster a disco
-        from qgis.PyQt.QtWidgets import QFileDialog                   # Ventana de escritorio para guardar archivos
+        # Herramientas para escribir ráster a disco
+        from qgis.core import QgsRasterFileWriter, QgsRasterPipe
+        # Ventana de escritorio para guardar archivos
+        from qgis.PyQt.QtWidgets import QFileDialog
 
-        layer = self.iface.activeLayer()                              # Obtener la capa activa en QGIS
+        # Obtener la capa activa en QGIS
+        layer = self.iface.activeLayer()
 
         # Si no hay capa activa, mostrar error y salir
         if layer is None:
-            self.iface.messageBar().pushMessage("Error", "No hay capa activa para exportar", level=2)
+            self.iface.messageBar().pushMessage(
+                "Error", "No hay capa activa para exportar", level=2)
             return
 
-        # Abrir ventana de "documentos" para que el usuario elija dónde quiere guardar el archivo
+        # Abrir ventana de "documentos" para que el usuario elija dónde quiere
+        # guardar el archivo
         file_path, _ = QFileDialog.getSaveFileName(
             None,
             "Guardar capa realzada como GeoTIFF",
-            "",                                                       # El archivo no tine nombre predeterminado
+            # El archivo no tine nombre predeterminado
+            "",
             "GeoTIFF (*.tif *.tiff)"
         )
 
@@ -263,23 +305,27 @@ class GeoGlyph:
         # Proveedor es el que tiene acceso a los  datos reales de la capa
         provider = layer.dataProvider()
 
-        # El pipe es por donde pasan esos datos desde el proveedor hasta el archivo que se va a guardar
+        # El pipe es por donde pasan esos datos desde el proveedor hasta el
+        # archivo que se va a guardar
         pipe = QgsRasterPipe()
 
         # Cargar el proveedor en el pipe, si falla mostrar error
         if not pipe.set(provider.clone()):
-            self.iface.messageBar().pushMessage("Error", "No se pudo preparar la capa para exportar", level=2)
+            self.iface.messageBar().pushMessage(
+                "Error", "No se pudo preparar la capa para exportar", level=2)
             return
 
-        # Insertar el renderer en el pipe para que el GeoTIFF exportado tenga los colores del realce aplicado
+        # Insertar el renderer en el pipe para que el GeoTIFF exportado tenga
+        # los colores del realce aplicado
         renderer = layer.renderer()
         if renderer:
             pipe.set(renderer.clone())
 
-        writer = QgsRasterFileWriter(file_path)      # Escribe los datos al archivo en disco
+        # Escribe los datos al archivo en disco
+        writer = QgsRasterFileWriter(file_path)
         writer.setOutputFormat("GTiff")              # Le da el formato
 
-        # Escribir el archivo conservando el CRS y extensión espacial original      
+        # Escribir el archivo conservando el CRS y extensión espacial original
         error = writer.writeRaster(
             pipe,
             provider.xSize(),                        # Ancho en píxeles
@@ -290,20 +336,24 @@ class GeoGlyph:
 
         # QgsRasterFileWriter.NoError es el código de éxito
         if error == QgsRasterFileWriter.NoError:
-            self.iface.messageBar().pushMessage("Éxito", f"Capa exportada correctamente: {file_path}", level=0)
+            self.iface.messageBar().pushMessage(
+                "Éxito", f"Capa exportada correctamente: {file_path}", level=0)
         else:
-            self.iface.messageBar().pushMessage("Error", "No se pudo exportar la capa", level=2)
+            self.iface.messageBar().pushMessage(
+                "Error", "No se pudo exportar la capa", level=2)
+
     def abrir_decorrelation_stretch(self):
         """Abre el diálogo para aplicar decorrelation stretch (PCA sobre 3 bandas)."""
-        dlg = DecorrelationStretchDialog(self.iface, parent=self.iface.mainWindow())
+        dlg = DecorrelationStretchDialog(
+            self.iface, parent=self.iface.mainWindow())
         dlg.exec_()
 
     def run(self):
-        """Muestra/oculta el panel lateral."""
+        # Muestra u oculta el panel lateral.
         if self.panel is not None:
             self.panel.setVisible(not self.panel.isVisible())
 
-    # ── TIGS-42: Comunicación HTTP asíncrona ──────────────────────────────────
+    # ── TIGS-42: Comunicación HTTP asíncrona ────────────────────────────────
 
     def _ejecutar_inferencia(self):
         """
@@ -320,7 +370,8 @@ class GeoGlyph:
             "color: orange; font-size: 10px; margin-left: 4px;"
         )
 
-        # bbox placeholder — en iteraciones futuras vendrá del ROI seleccionado en QGIS
+        # bbox placeholder — en iteraciones futuras vendrá del ROI seleccionado
+        # en QGIS
         self._worker = EnhanceWorker(bbox=[0, 0, 256, 256], band=1)
         self._worker.finished.connect(self._on_inferencia_ok)
         self._worker.error.connect(self._on_inferencia_error)
@@ -344,3 +395,42 @@ class GeoGlyph:
             "color: red; font-size: 10px; margin-left: 4px;"
         )
         self.panel.btn_inferencia.setEnabled(True)
+
+    def _activar_herramienta_dibujo(self):
+        # Activa la herramienta de dibujo de polígonos en el canvas
+        canvas = self.iface.mapCanvas()
+
+        # Inicializar el manager si no existe aún
+        if self._annotation_manager is None:
+            crs = canvas.mapSettings().destinationCrs()
+            gpkg_path = os.path.join(
+                os.path.dirname(__file__), "annotations.gpkg"
+            )
+            self._annotation_manager = AnnotationManager(gpkg_path, crs)
+
+        # Crear y activar la herramienta de dibujo
+        self._draw_tool = PolygonDrawTool(
+            canvas, self._on_poligono_dibujado, self.iface)
+        canvas.setMapTool(self._draw_tool)
+
+        self.iface.messageBar().pushMessage(
+            "GeoGlyph",
+            "Clic izquierdo: agregar vértice | Clic derecho: cerrar polígono | Escape: cancelar",
+            level=0,
+            duration=5)
+
+    def _on_poligono_dibujado(self, geometry):
+        # Callback que recibe el polígono terminado y lo guarda.
+        if self._annotation_manager is None:
+            return
+
+        # feature = self._annotation_manager.agregar_anotacion(geometry)
+        self.iface.messageBar().pushMessage(
+            "GeoGlyph",
+            "Anotación guardada — estado: pending | origen: human",
+            level=0,
+            duration=3
+        )
+
+        # Volver a la herramienta de navegación normal
+        self.iface.mapCanvas().unsetMapTool(self._draw_tool)
