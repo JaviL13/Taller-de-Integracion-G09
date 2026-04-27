@@ -34,6 +34,9 @@ from .http_worker import EnhanceWorker  # ← nuevo en TIGS-42
 from .decorrelation_dialog import DecorrelationStretchDialog
 from .annotation_tool import PolygonDrawTool  # Se importa para crear los dibujos
 from .annotation_manager import AnnotationManager
+from .roi_select_tool import RectangularROITool  # TIGS-53
+from .infer_worker import InferWorker  # TIGS-53
+from .raster_crop import extract_raster_crop  # TIGS-53
 
 import os.path
 
@@ -59,6 +62,8 @@ class GeoGlyph:
         self._worker = None  # referencia al worker activo (evita GC prematuro)
         self._draw_tool = None  # Para la funcionalidad de dibujo
         self._annotation_manager = None  # Para la funcionalidad de dibujo
+        self._roi_tool = None  # TIGS-53: herramienta de ROI rectangular
+        self._infer_worker = None  # TIGS-53: worker async aiohttp para /infer
 
     def tr(self, message):
         return QCoreApplication.translate('GeoGlyph', message)
@@ -114,6 +119,9 @@ class GeoGlyph:
         self.panel.btn_dibujar.clicked.connect(
             self._activar_herramienta_dibujo)
 
+        # TIGS-53: botón para seleccionar un ROI rectangular y enviarlo al backend
+        self.panel.btn_roi.clicked.connect(self._activar_herramienta_roi)
+
         # Agregar el panel a QGIS (lado derecho por defecto)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
 
@@ -131,6 +139,11 @@ class GeoGlyph:
         if self._worker is not None and self._worker.isRunning():
             self._worker.quit()
             self._worker.wait()
+
+        # TIGS-53: idem para el worker de /infer.
+        if self._infer_worker is not None and self._infer_worker.isRunning():
+            self._infer_worker.quit()
+            self._infer_worker.wait()
 
     def abrir_geotiff(self):
         # Abre el diálogo para cargar un GeoTIFF
@@ -434,3 +447,146 @@ class GeoGlyph:
 
         # Volver a la herramienta de navegación normal
         self.iface.mapCanvas().unsetMapTool(self._draw_tool)
+
+    # ── TIGS-53: Selección de ROI rectangular y envío a /infer ──────────────
+
+    def _activar_herramienta_roi(self):
+        """Activa la herramienta `RectangularROITool` sobre el canvas.
+
+        Verifica que haya una capa raster activa antes de habilitar la
+        selección — sin raster no tiene sentido seleccionar un ROI.
+        """
+        # Validar que haya una capa raster seleccionada.
+        layer = self.iface.activeLayer()
+        if not isinstance(layer, QgsRasterLayer):
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                "Selecciona primero una capa raster para definir el ROI.",
+                level=1,
+                duration=4,
+            )
+            return
+
+        canvas = self.iface.mapCanvas()
+        # Crear la herramienta y guardarla como atributo para evitar que el
+        # GC la elimine — Qt requiere que el objeto siga vivo mientras esté
+        # asignado como mapTool.
+        self._roi_tool = RectangularROITool(
+            canvas, self._on_roi_seleccionado, self.iface
+        )
+        canvas.setMapTool(self._roi_tool)
+
+        # Mensaje de instrucciones al usuario.
+        self.iface.messageBar().pushMessage(
+            "GeoGlyph",
+            "Arrastra con clic izquierdo para definir un ROI rectangular. "
+            "Esc cancela.",
+            level=0,
+            duration=5,
+        )
+
+    def _on_roi_seleccionado(self, rect):
+        """Callback que recibe el QgsRectangle seleccionado por el usuario.
+
+        Pasos:
+          1. Extraer metadatos del recorte raster (bbox, image_path, EPSG).
+          2. Lanzar InferWorker (aiohttp) en hilo aparte.
+          3. Mostrar el estado en el panel hasta que termine el request.
+          4. Si el backend está caído, avisar pero NO bloquear la herramienta
+             de anotación manual (degradación controlada — DoD TIGS-53).
+        """
+        layer = self.iface.activeLayer()
+
+        # 1. Extraer metadatos del recorte. Si la ROI cae fuera del raster
+        # o la capa no es válida, el helper levanta ValueError → se avisa
+        # al usuario y se aborta sin lanzar la llamada HTTP.
+        try:
+            crop_info = extract_raster_crop(layer, rect)
+        except ValueError as e:
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph", str(e), level=1, duration=4
+            )
+            return
+
+        # Evitar llamadas concurrentes al backend desde la misma sesión.
+        if self._infer_worker is not None and self._infer_worker.isRunning():
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                "Ya hay una inferencia en curso, espera a que termine.",
+                level=1,
+                duration=3,
+            )
+            return
+
+        # 2. Lanzar el worker async (aiohttp) en hilo aparte. La URL base
+        # se mantiene hardcoded igual que EnhanceWorker (TIGS-42); cuando
+        # exista un panel de configuración de backend se reusa allí.
+        self.panel.lbl_status.setText(
+            f"Estado: enviando ROI ({crop_info['pixels_w']}x"
+            f"{crop_info['pixels_h']}px) a /infer..."
+        )
+        self.panel.lbl_status.setStyleSheet(
+            "color: orange; font-size: 10px; margin-left: 4px;"
+        )
+        self._infer_worker = InferWorker(
+            bbox=crop_info["bbox"],
+            image_path=crop_info["image_path"],
+            crs_epsg=crop_info["crs_epsg"],
+        )
+        self._infer_worker.finished.connect(self._on_infer_ok)
+        self._infer_worker.error.connect(self._on_infer_error)
+        self._infer_worker.start()
+
+    def _on_infer_ok(self, status_code, elapsed, body):
+        """Callback ejecutado en el hilo principal cuando /infer responde OK.
+
+        El body sigue el contrato InferResponse de TIGS-49:
+            { status, detections[{polygon, confidence}], model_version,
+              timestamp, processing_time_ms }
+        """
+        detections = body.get("detections", []) if isinstance(body, dict) else []
+        n = len(detections)
+        # Mostramos en el label de estado el primer score (orientativo) +
+        # versión del modelo para distinguir mock vs SAM real.
+        if n > 0 and isinstance(detections[0], dict):
+            conf = detections[0].get("confidence", "—")
+            model = body.get("model_version", "?")
+            self.panel.lbl_status.setText(
+                f"Estado: HTTP {status_code} · {elapsed:.2f}s · "
+                f"{n} det · score={conf} · modelo={model}"
+            )
+        else:
+            self.panel.lbl_status.setText(
+                f"Estado: HTTP {status_code} · {elapsed:.2f}s · sin detecciones"
+            )
+        self.panel.lbl_status.setStyleSheet(
+            "color: green; font-size: 10px; margin-left: 4px;"
+        )
+
+    def _on_infer_error(self, msg):
+        """Callback de error del worker /infer.
+
+        Degradación controlada (DoD TIGS-53): se notifica al usuario con
+        un QMessageBox + label de estado, pero la herramienta de anotación
+        manual sigue funcional — no se desactiva ni el panel ni el botón
+        de dibujo de polígonos.
+        """
+        # Import diferido para no cargar QtWidgets si nunca falla la inferencia.
+        from qgis.PyQt.QtWidgets import QMessageBox
+
+        # Mensaje en el label del panel (no intrusivo).
+        self.panel.lbl_status.setText(f"Error /infer: {msg}")
+        self.panel.lbl_status.setStyleSheet(
+            "color: red; font-size: 10px; margin-left: 4px;"
+        )
+
+        # QMessageBox modal pero sin bloquear el resto del plugin: deja
+        # claro al usuario que la inferencia falló y que aún puede seguir
+        # anotando manualmente.
+        QMessageBox.warning(
+            self.iface.mainWindow(),
+            "GeoGlyph — backend no disponible",
+            f"No se pudo enviar el ROI al backend:\n\n{msg}\n\n"
+            "Puedes seguir trabajando con la anotación manual "
+            "(\"Dibujar polígono\").",
+        )
