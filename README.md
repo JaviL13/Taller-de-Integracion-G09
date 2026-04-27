@@ -258,3 +258,20 @@ pytest -v --cov=. --cov-report=term-missing
 Si se quiere correr solo los test de TIGS-35: 
 ```bash
 pytest tests/test_tigs35.py -v --cov=. --cov-report=term-missing
+```
+
+---
+
+## Wireframes del flujo de validación 
+
+### **Pantalla 1 — Imagen cargada**
+![Imagen 1](data/wireframes/Imagen1.png)
+
+### **Pantalla 2 — ROI seleccionada**
+![Imagen 2](data/wireframes/Imagen2.png)
+
+### **Pantalla 3 — Panel de decisión**
+![Imagen 3](data/wireframes/Imagen3.png)
+
+### **Pantalla 4 — Estado final**
+![Imagen 4](data/wireframes/Imagen4.png)
