@@ -119,8 +119,7 @@ class RectangularROITool(QgsMapTool):
         # Construir el QgsRectangle: normalized() garantiza que x1<=x2 e
         # y1<=y2 sin importar la dirección del arrastre (puede ser cualquiera
         # de las 4 diagonales).
-        rect = QgsRectangle(self.start_point, self.end_point)
-        rect.normalize()
+        rect = QgsRectangle(self.start_point, self.end_point).normalized()
 
         # Validar que la selección tenga área no nula. Un clic simple sin
         # arrastre produciría un rectángulo degenerado (ancho/alto = 0).
