@@ -1,0 +1,773 @@
+From 01532a20cf173264ee1d942ad1c36f1c033b491e Mon Sep 17 00:00:00 2001
+From: Javi L <javipaz.larrain@gmail.com>
+Date: Mon, 27 Apr 2026 01:51:44 +0000
+Subject: [PATCH] =?UTF-8?q?feat(TIGS-53):=20selecci=C3=B3n=20rectangular?=
+ =?UTF-8?q?=20de=20ROI=20sobre=20canvas=20QGIS=20y=20env=C3=ADo=20async=20?=
+ =?UTF-8?q?a=20/infer?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- roi_select_tool.py: nueva QgsMapTool RectangularROITool que dibuja un
+  ROI rectangular con feedback visual (QgsRubberBand) y devuelve un
+  QgsRectangle al callback (mismo patrón que PolygonDrawTool de TIGS-43).
+- raster_crop.py: helper extract_raster_crop() que reproyecta la ROI al
+  CRS del raster, valida intersección con el extent y construye el
+  payload de /infer (bbox + image_path + crs_epsg).
+- infer_worker.py: nuevo InferWorker (QThread) que ejecuta POST /infer
+  con aiohttp en un event loop dedicado al hilo, sin bloquear QGIS.
+  Maneja timeout, backend caído, JSON inválido y aiohttp ausente.
+- geoglyph.py: botón 'Seleccionar ROI', activador de la herramienta y
+  callbacks _on_infer_ok / _on_infer_error con QMessageBox para
+  degradación controlada (la anotación manual sigue disponible).
+- geoglyph_panel.py: nuevo botón btn_roi en la sección Anotaciones.
+- requirements.txt: agrega aiohttp.
+
+Refs: TIGS-49 (POST /infer), TIGS-43 (PolygonDrawTool baseline)
+---
+ geoglyph.py        | 156 ++++++++++++++++++++++++++++++++++++
+ geoglyph_panel.py  |  10 +++
+ infer_worker.py    | 170 +++++++++++++++++++++++++++++++++++++++
+ raster_crop.py     | 127 ++++++++++++++++++++++++++++++
+ requirements.txt   |   3 +-
+ roi_select_tool.py | 192 +++++++++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 657 insertions(+), 1 deletion(-)
+ create mode 100644 infer_worker.py
+ create mode 100644 raster_crop.py
+ create mode 100644 roi_select_tool.py
+
+diff --git a/geoglyph.py b/geoglyph.py
+index 1ce7a6e..29b5afa 100644
+--- a/geoglyph.py
++++ b/geoglyph.py
+@@ -34,6 +34,9 @@ from .http_worker import EnhanceWorker  # ← nuevo en TIGS-42
+ from .decorrelation_dialog import DecorrelationStretchDialog
+ from .annotation_tool import PolygonDrawTool  # Se importa para crear los dibujos
+ from .annotation_manager import AnnotationManager
++from .roi_select_tool import RectangularROITool  # TIGS-53
++from .infer_worker import InferWorker  # TIGS-53
++from .raster_crop import extract_raster_crop  # TIGS-53
+ 
+ import os.path
+ 
+@@ -59,6 +62,8 @@ class GeoGlyph:
+         self._worker = None  # referencia al worker activo (evita GC prematuro)
+         self._draw_tool = None  # Para la funcionalidad de dibujo
+         self._annotation_manager = None  # Para la funcionalidad de dibujo
++        self._roi_tool = None  # TIGS-53: herramienta de ROI rectangular
++        self._infer_worker = None  # TIGS-53: worker async aiohttp para /infer
+ 
+     def tr(self, message):
+         return QCoreApplication.translate('GeoGlyph', message)
+@@ -114,6 +119,9 @@ class GeoGlyph:
+         self.panel.btn_dibujar.clicked.connect(
+             self._activar_herramienta_dibujo)
+ 
++        # TIGS-53: botón para seleccionar un ROI rectangular y enviarlo al backend
++        self.panel.btn_roi.clicked.connect(self._activar_herramienta_roi)
++
+         # Agregar el panel a QGIS (lado derecho por defecto)
+         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
+ 
+@@ -132,6 +140,11 @@ class GeoGlyph:
+             self._worker.quit()
+             self._worker.wait()
+ 
++        # TIGS-53: idem para el worker de /infer.
++        if self._infer_worker is not None and self._infer_worker.isRunning():
++            self._infer_worker.quit()
++            self._infer_worker.wait()
++
+     def abrir_geotiff(self):
+         # Abre el diálogo para cargar un GeoTIFF
+         dlg = GeoGlyphDialog(self.iface)
+@@ -434,3 +447,146 @@ class GeoGlyph:
+ 
+         # Volver a la herramienta de navegación normal
+         self.iface.mapCanvas().unsetMapTool(self._draw_tool)
++
++    # ── TIGS-53: Selección de ROI rectangular y envío a /infer ──────────────
++
++    def _activar_herramienta_roi(self):
++        """Activa la herramienta `RectangularROITool` sobre el canvas.
++
++        Verifica que haya una capa raster activa antes de habilitar la
++        selección — sin raster no tiene sentido seleccionar un ROI.
++        """
++        # Validar que haya una capa raster seleccionada.
++        layer = self.iface.activeLayer()
++        if not isinstance(layer, QgsRasterLayer):
++            self.iface.messageBar().pushMessage(
++                "GeoGlyph",
++                "Selecciona primero una capa raster para definir el ROI.",
++                level=1,
++                duration=4,
++            )
++            return
++
++        canvas = self.iface.mapCanvas()
++        # Crear la herramienta y guardarla como atributo para evitar que el
++        # GC la elimine — Qt requiere que el objeto siga vivo mientras esté
++        # asignado como mapTool.
++        self._roi_tool = RectangularROITool(
++            canvas, self._on_roi_seleccionado, self.iface
++        )
++        canvas.setMapTool(self._roi_tool)
++
++        # Mensaje de instrucciones al usuario.
++        self.iface.messageBar().pushMessage(
++            "GeoGlyph",
++            "Arrastra con clic izquierdo para definir un ROI rectangular. "
++            "Esc cancela.",
++            level=0,
++            duration=5,
++        )
++
++    def _on_roi_seleccionado(self, rect):
++        """Callback que recibe el QgsRectangle seleccionado por el usuario.
++
++        Pasos:
++          1. Extraer metadatos del recorte raster (bbox, image_path, EPSG).
++          2. Lanzar InferWorker (aiohttp) en hilo aparte.
++          3. Mostrar el estado en el panel hasta que termine el request.
++          4. Si el backend está caído, avisar pero NO bloquear la herramienta
++             de anotación manual (degradación controlada — DoD TIGS-53).
++        """
++        layer = self.iface.activeLayer()
++
++        # 1. Extraer metadatos del recorte. Si la ROI cae fuera del raster
++        # o la capa no es válida, el helper levanta ValueError → se avisa
++        # al usuario y se aborta sin lanzar la llamada HTTP.
++        try:
++            crop_info = extract_raster_crop(layer, rect)
++        except ValueError as e:
++            self.iface.messageBar().pushMessage(
++                "GeoGlyph", str(e), level=1, duration=4
++            )
++            return
++
++        # Evitar llamadas concurrentes al backend desde la misma sesión.
++        if self._infer_worker is not None and self._infer_worker.isRunning():
++            self.iface.messageBar().pushMessage(
++                "GeoGlyph",
++                "Ya hay una inferencia en curso, espera a que termine.",
++                level=1,
++                duration=3,
++            )
++            return
++
++        # 2. Lanzar el worker async (aiohttp) en hilo aparte. La URL base
++        # se mantiene hardcoded igual que EnhanceWorker (TIGS-42); cuando
++        # exista un panel de configuración de backend se reusa allí.
++        self.panel.lbl_status.setText(
++            f"Estado: enviando ROI ({crop_info['pixels_w']}x"
++            f"{crop_info['pixels_h']}px) a /infer..."
++        )
++        self.panel.lbl_status.setStyleSheet(
++            "color: orange; font-size: 10px; margin-left: 4px;"
++        )
++        self._infer_worker = InferWorker(
++            bbox=crop_info["bbox"],
++            image_path=crop_info["image_path"],
++            crs_epsg=crop_info["crs_epsg"],
++        )
++        self._infer_worker.finished.connect(self._on_infer_ok)
++        self._infer_worker.error.connect(self._on_infer_error)
++        self._infer_worker.start()
++
++    def _on_infer_ok(self, status_code, elapsed, body):
++        """Callback ejecutado en el hilo principal cuando /infer responde OK.
++
++        El body sigue el contrato InferResponse de TIGS-49:
++            { status, detections[{polygon, confidence}], model_version,
++              timestamp, processing_time_ms }
++        """
++        detections = body.get("detections", []) if isinstance(body, dict) else []
++        n = len(detections)
++        # Mostramos en el label de estado el primer score (orientativo) +
++        # versión del modelo para distinguir mock vs SAM real.
++        if n > 0 and isinstance(detections[0], dict):
++            conf = detections[0].get("confidence", "—")
++            model = body.get("model_version", "?")
++            self.panel.lbl_status.setText(
++                f"Estado: HTTP {status_code} · {elapsed:.2f}s · "
++                f"{n} det · score={conf} · modelo={model}"
++            )
++        else:
++            self.panel.lbl_status.setText(
++                f"Estado: HTTP {status_code} · {elapsed:.2f}s · sin detecciones"
++            )
++        self.panel.lbl_status.setStyleSheet(
++            "color: green; font-size: 10px; margin-left: 4px;"
++        )
++
++    def _on_infer_error(self, msg):
++        """Callback de error del worker /infer.
++
++        Degradación controlada (DoD TIGS-53): se notifica al usuario con
++        un QMessageBox + label de estado, pero la herramienta de anotación
++        manual sigue funcional — no se desactiva ni el panel ni el botón
++        de dibujo de polígonos.
++        """
++        # Import diferido para no cargar QtWidgets si nunca falla la inferencia.
++        from qgis.PyQt.QtWidgets import QMessageBox
++
++        # Mensaje en el label del panel (no intrusivo).
++        self.panel.lbl_status.setText(f"Error /infer: {msg}")
++        self.panel.lbl_status.setStyleSheet(
++            "color: red; font-size: 10px; margin-left: 4px;"
++        )
++
++        # QMessageBox modal pero sin bloquear el resto del plugin: deja
++        # claro al usuario que la inferencia falló y que aún puede seguir
++        # anotando manualmente.
++        QMessageBox.warning(
++            self.iface.mainWindow(),
++            "GeoGlyph — backend no disponible",
++            f"No se pudo enviar el ROI al backend:\n\n{msg}\n\n"
++            "Puedes seguir trabajando con la anotación manual "
++            "(\"Dibujar polígono\").",
++        )
+diff --git a/geoglyph_panel.py b/geoglyph_panel.py
+index 1cf3c30..86ff4cd 100644
+--- a/geoglyph_panel.py
++++ b/geoglyph_panel.py
+@@ -95,6 +95,16 @@ class GeoGlyphPanel(QDockWidget):
+         )
+         layout.addWidget(self.btn_dibujar)
+ 
++        # TIGS-53: botón para seleccionar un ROI rectangular y enviarlo al
++        # backend (POST /infer). Se ubica junto a "Dibujar polígono" porque
++        # ambos botones activan herramientas de selección sobre el canvas.
++        self.btn_roi = QPushButton("Seleccionar ROI (rect)")
++        self.btn_roi.setToolTip(
++            "Activa la herramienta de selección rectangular: "
++            "arrastra para definir un ROI y enviar a /infer en el backend"
++        )
++        layout.addWidget(self.btn_roi)
++
+         btn_importar = QPushButton("Importar detecciones")
+         btn_importar.setToolTip(
+             "Importa detecciones en formato GeoJSON o probability map TIFF (próximamente)")
+diff --git a/infer_worker.py b/infer_worker.py
+new file mode 100644
+index 0000000..cd1bcfa
+--- /dev/null
++++ b/infer_worker.py
+@@ -0,0 +1,170 @@
++# -*- coding: utf-8 -*-
++"""
++infer_worker.py — TIGS-53
++
++Worker asíncrono que envía el ROI al endpoint POST /infer del backend
++FastAPI usando aiohttp.
++
++Diseño:
++  - Se hereda de QThread (igual que `EnhanceWorker` de TIGS-42) para no
++    bloquear el hilo principal de QGIS.
++  - Dentro de `run()` se crea un event loop de asyncio propio del hilo y
++    se ejecuta una corrutina que usa `aiohttp.ClientSession`.
++  - Se exponen señales `finished(int, float, dict)` y `error(str)` para
++    comunicar el resultado al hilo principal de Qt (signals/slots son
++    thread-safe en Qt).
++
++Manejo de fallos (degradación controlada — DoD TIGS-53):
++  - Si el backend está apagado / inalcanzable     → emite `error`.
++  - Si el backend devuelve HTTP != 200             → emite `error`.
++  - Si la respuesta no es JSON parseable           → emite `error`.
++  - Si aiohttp no está instalado en el QGIS host   → emite `error`.
++  En todos los casos el worker termina limpio sin propagar excepciones
++  al hilo principal: la herramienta de anotación manual sigue disponible.
++"""
++
++import asyncio
++import json
++import time
++
++from qgis.PyQt.QtCore import QThread, pyqtSignal
++
++
++class InferWorker(QThread):
++    """QThread que ejecuta POST /infer con aiohttp.
++
++    Signals:
++        finished(int, float, dict): status HTTP, segundos transcurridos, body
++        error(str): mensaje legible para mostrar al usuario.
++
++    Args:
++        bbox: lista de 4 floats [x1, y1, x2, y2] en el CRS del raster.
++        image_path: ruta del archivo fuente del raster (puede ser None).
++        crs_epsg: EPSG numérico del CRS del bbox (puede ser None).
++        base_url: URL base del backend FastAPI. Por defecto coincide con la
++            que usa EnhanceWorker (TIGS-42) para que ambos workers apunten
++            al mismo servidor sin configuración duplicada.
++        parent: parent Qt (opcional).
++    """
++
++    finished = pyqtSignal(int, float, dict)
++    error = pyqtSignal(str)
++
++    # Tiempo máximo total que el worker espera al backend. Coherente con
++    # EnhanceWorker para que el usuario tenga la misma expectativa de UX.
++    TIMEOUT_SECONDS = 30
++
++    def __init__(
++        self,
++        bbox,
++        image_path=None,
++        crs_epsg=None,
++        base_url="http://localhost:8000",
++        parent=None,
++    ):
++        super().__init__(parent)
++        # URL completa del endpoint /infer. Al concatenar con base_url se
++        # respeta la misma convención que EnhanceWorker (`{base}/enhance`).
++        self.url = f"{base_url}/infer"
++
++        # Payload con el contrato InferRequest del backend (TIGS-49):
++        #   bbox        -> list[float] (4 valores)
++        #   image_path  -> Optional[str]
++        #   crs_epsg    -> Optional[int]
++        # Las claves opcionales se omiten cuando son None para no enviar
++        # nulls al backend (algunos parsers Pydantic son estrictos).
++        payload = {"bbox": list(bbox)}
++        if image_path is not None:
++            payload["image_path"] = image_path
++        if crs_epsg is not None:
++            payload["crs_epsg"] = int(crs_epsg)
++        self.payload = payload
++
++    # ------------------------------------------------------------------ #
++    # QThread entry point                                                #
++    # ------------------------------------------------------------------ #
++
++    def run(self):
++        """Punto de entrada del hilo: lanza el event loop asyncio.
++
++        QThread llama a este método cuando se invoca `.start()`. Aquí se
++        construye un event loop dedicado al hilo (no se puede reutilizar
++        el loop del hilo principal de Qt) y se ejecuta la corrutina HTTP.
++        """
++        # Crear un event loop nuevo para este hilo. `new_event_loop` +
++        # `set_event_loop` es el patrón estándar para usar asyncio dentro
++        # de un QThread sin interferir con el loop principal.
++        loop = asyncio.new_event_loop()
++        asyncio.set_event_loop(loop)
++        try:
++            loop.run_until_complete(self._post_infer())
++        finally:
++            # Cerrar el loop SIEMPRE, incluso si _post_infer levantó algo
++            # inesperado, para que el hilo no quede colgado.
++            loop.close()
++
++    # ------------------------------------------------------------------ #
++    # Corrutina principal                                                #
++    # ------------------------------------------------------------------ #
++
++    async def _post_infer(self):
++        """Ejecuta el POST asíncrono al endpoint /infer.
++
++        Toda la lógica de errores está aquí dentro: se traduce cada
++        excepción de aiohttp/asyncio a una señal `error(str)` legible.
++        Nunca se propaga una excepción fuera de la corrutina (el llamador
++        es `run()` que no debería ver fallos).
++        """
++        # Importación tardía: aiohttp no es dependencia core del plugin
++        # QGIS y puede no estar instalado en todos los hosts. Mejor
++        # detectar el ImportError aquí y emitir un error legible que
++        # crashear al cargar el módulo.
++        try:
++            import aiohttp
++        except ImportError:
++            self.error.emit("aiohttp no está instalado en el entorno de QGIS. Ejecuta: pip install aiohttp")
++            return
++
++        start = time.time()
++        try:
++            # ClientTimeout cubre conexión + lectura. Si el backend acepta
++            # la conexión pero no responde, se aborta a los TIMEOUT_SECONDS.
++            timeout = aiohttp.ClientTimeout(total=self.TIMEOUT_SECONDS)
++            async with aiohttp.ClientSession(timeout=timeout) as session:
++                async with session.post(
++                    self.url,
++                    json=self.payload,
++                    headers={"Content-Type": "application/json"},
++                ) as resp:
++                    elapsed = time.time() - start
++                    raw = await resp.text()
++
++                    # Intentar parsear JSON aunque el status sea != 200,
++                    # porque FastAPI devuelve detalles de error en JSON.
++                    try:
++                        body = json.loads(raw)
++                    except json.JSONDecodeError:
++                        self.error.emit("Respuesta inesperada del backend (no es JSON válido).")
++                        return
++
++                    # Caso éxito: 2xx → emit finished con el body parseado.
++                    if 200 <= resp.status < 300:
++                        self.finished.emit(resp.status, elapsed, body)
++                        return
++
++                    # Caso HTTP != 2xx: error legible con detalle del backend.
++                    detail = body.get("detail") if isinstance(body, dict) else None
++                    self.error.emit(f"HTTP {resp.status}: {detail or str(body)[:200]}")
++
++        except asyncio.TimeoutError:
++            # asyncio.TimeoutError es lo que dispara aiohttp cuando se
++            # agota ClientTimeout — más específico que "Backend caído".
++            self.error.emit(f"Timeout: el backend no respondió en {self.TIMEOUT_SECONDS}s.")
++
++        except Exception as e:  # noqa: BLE001
++            # Captura general para no dejar excepciones sueltas en el
++            # hilo. aiohttp lanza varios tipos: ClientConnectorError,
++            # ClientResponseError, etc. — todos se reportan al usuario
++            # como "backend no disponible" y se conserva el tipo en el
++            # mensaje para facilitar debugging.
++            self.error.emit(f"Backend no disponible en {self.url} — {type(e).__name__}: {e}")
+diff --git a/raster_crop.py b/raster_crop.py
+new file mode 100644
+index 0000000..a787ef3
+--- /dev/null
++++ b/raster_crop.py
+@@ -0,0 +1,127 @@
++# -*- coding: utf-8 -*-
++"""
++raster_crop.py — TIGS-53
++
++Utilidades para extraer un recorte (crop) del raster activo dado un
++QgsRectangle de ROI seleccionado por el usuario.
++
++Diseño:
++  - `extract_raster_crop(layer, rect)` devuelve un dict con:
++        bbox       lista de 4 floats [x1, y1, x2, y2] en el CRS del raster
++        image_path ruta del archivo fuente del raster (para trazabilidad)
++        crs_epsg   EPSG numérico del CRS del raster (None si no se puede inferir)
++        pixels_w   ancho en píxeles del recorte (referencial)
++        pixels_h   alto en píxeles del recorte (referencial)
++
++  El recorte real (los bytes del raster) NO se envía al endpoint /infer
++  porque la versión actual del contrato (TIGS-49) sólo recibe metadatos
++  (bbox + image_path + crs_epsg). Se calcula el ancho/alto en píxeles
++  para fines de logging/debug y para que quede preparado el día que el
++  endpoint pase a aceptar bytes binarios.
++"""
++
++from typing import Optional
++
++from qgis.core import (
++    QgsCoordinateTransform,
++    QgsCoordinateTransformContext,
++    QgsProject,
++    QgsRasterLayer,
++    QgsRectangle,
++)
++
++
++def extract_raster_crop(layer: QgsRasterLayer, rect: QgsRectangle) -> dict:
++    """Extrae los metadatos del recorte de un raster dada una ROI.
++
++    Args:
++        layer: Capa raster activa de QGIS sobre la que se hizo la selección.
++        rect:  QgsRectangle con la ROI dibujada en coordenadas del CRS del
++               canvas (puede diferir del CRS del raster).
++
++    Returns:
++        dict con bbox, image_path, crs_epsg y dimensiones en píxeles del
++        recorte. Las claves coinciden con el contrato InferRequest del
++        backend (TIGS-49) para poder pasar el dict directamente a aiohttp.
++
++    Raises:
++        ValueError: si la ROI no intersecta el raster (selección fuera de la
++            imagen) o si la capa no es válida.
++    """
++    if layer is None or not isinstance(layer, QgsRasterLayer):
++        raise ValueError("La capa activa no es un raster válido.")
++
++    # ------------------------------------------------------------------ #
++    # 1. Reproyectar la ROI al CRS del raster                             #
++    # ------------------------------------------------------------------ #
++    # El usuario puede tener el canvas en un CRS distinto del raster
++    # (ej. canvas en EPSG:3857 y raster en EPSG:32719). Para que el bbox
++    # tenga sentido sobre el raster, se reproyecta al CRS del raster.
++    raster_crs = layer.crs()
++    canvas_crs = QgsProject.instance().crs()
++
++    if canvas_crs != raster_crs:
++        transform = QgsCoordinateTransform(canvas_crs, raster_crs, QgsCoordinateTransformContext())
++        roi_in_raster_crs = transform.transformBoundingBox(rect)
++    else:
++        # Mismo CRS: no hace falta reproyectar.
++        roi_in_raster_crs = QgsRectangle(rect)
++
++    # ------------------------------------------------------------------ #
++    # 2. Validar intersección con la extensión del raster                #
++    # ------------------------------------------------------------------ #
++    # Si el usuario seleccionó fuera de la imagen, el bbox no tiene
++    # sentido y el endpoint devolvería un polígono inválido.
++    if not roi_in_raster_crs.intersects(layer.extent()):
++        raise ValueError("La ROI seleccionada no intersecta el raster activo.")
++
++    # Recortar al área válida del raster — evita enviar coords fuera de
++    # la imagen al backend.
++    roi_clipped = roi_in_raster_crs.intersect(layer.extent())
++
++    # ------------------------------------------------------------------ #
++    # 3. Calcular dimensiones del recorte en píxeles                     #
++    # ------------------------------------------------------------------ #
++    # No es info crítica para el endpoint mock pero útil para log/debug
++    # y para validar que el recorte tenga tamaño razonable (>0 píxeles).
++    provider = layer.dataProvider()
++    raster_w = provider.xSize()  # ancho en píxeles
++    raster_h = provider.ySize()  # alto en píxeles
++
++    # Resolución por píxel (units/pixel) en cada eje.
++    extent = layer.extent()
++    px_per_unit_x = raster_w / extent.width() if extent.width() > 0 else 0
++    px_per_unit_y = raster_h / extent.height() if extent.height() > 0 else 0
++
++    pixels_w = max(1, int(round(roi_clipped.width() * px_per_unit_x)))
++    pixels_h = max(1, int(round(roi_clipped.height() * px_per_unit_y)))
++
++    # ------------------------------------------------------------------ #
++    # 4. Inferir EPSG y path del archivo fuente                          #
++    # ------------------------------------------------------------------ #
++    crs_epsg: Optional[int] = None
++    auth_id = raster_crs.authid()  # ej "EPSG:32719"
++    if auth_id and auth_id.upper().startswith("EPSG:"):
++        try:
++            crs_epsg = int(auth_id.split(":", 1)[1])
++        except ValueError:
++            crs_epsg = None
++
++    # `source()` devuelve la ruta del archivo en disco (o un URI más
++    # complejo si la capa viene de WMS/PG). Lo usamos como image_path en
++    # la request — el backend puede usarlo si está montado en la misma
++    # máquina, o ignorarlo en el caso del mock.
++    image_path = layer.source() or None
++
++    return {
++        "bbox": [
++            roi_clipped.xMinimum(),
++            roi_clipped.yMinimum(),
++            roi_clipped.xMaximum(),
++            roi_clipped.yMaximum(),
++        ],
++        "image_path": image_path,
++        "crs_epsg": crs_epsg,
++        "pixels_w": pixels_w,
++        "pixels_h": pixels_h,
++    }
+diff --git a/requirements.txt b/requirements.txt
+index c0ae319..f16d0e9 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -3,4 +3,5 @@ pylint
+ pytest
+ pytest-cov
+ rasterio
+-numpy
+\ No newline at end of file
++numpy
++aiohttp
+diff --git a/roi_select_tool.py b/roi_select_tool.py
+new file mode 100644
+index 0000000..53e6043
+--- /dev/null
++++ b/roi_select_tool.py
+@@ -0,0 +1,192 @@
++# -*- coding: utf-8 -*-
++"""
++roi_select_tool.py — TIGS-53
++
++Herramienta de selección rectangular de ROI (Region Of Interest) sobre el
++canvas de QGIS.
++
++Sigue el mismo patrón de QgsMapTool ya usado por `annotation_tool.py`
++(TIGS-43, PolygonDrawTool): se hereda de `QgsMapTool` y se usa un
++`QgsRubberBand` para feedback visual mientras el usuario arrastra el ratón.
++
++Diferencia con PolygonDrawTool:
++  - PolygonDrawTool dibuja vértices con clics sucesivos (clic izquierdo
++    agrega, clic derecho cierra).
++  - Esta herramienta dibuja un rectángulo arrastrando: press → move → release.
++
++Cuando el usuario suelta el botón, se invoca el callback `on_roi_selected`
++con un `QgsRectangle` (en coordenadas del CRS del canvas) que el código
++cliente puede usar para:
++  1. Recortar el raster activo (ver raster_crop.py).
++  2. Enviar el bbox al backend en POST /infer (ver infer_worker.py).
++"""
++
++from qgis.core import QgsGeometry, QgsPointXY, QgsRectangle, QgsWkbTypes
++from qgis.gui import QgsMapTool, QgsRubberBand
++from qgis.PyQt.QtCore import Qt
++from qgis.PyQt.QtGui import QColor
++
++
++class RectangularROITool(QgsMapTool):
++    """QgsMapTool que permite seleccionar un ROI rectangular en el canvas.
++
++    Uso desde geoglyph.py::
++
++        self._roi_tool = RectangularROITool(canvas, on_roi_selected, iface)
++        canvas.setMapTool(self._roi_tool)
++
++    Eventos:
++      - canvasPressEvent (clic izquierdo)   → registra esquina inicial.
++      - canvasMoveEvent  (mientras arrastra) → actualiza la rubber band.
++      - canvasReleaseEvent (suelta clic)    → finaliza y llama callback.
++      - keyPressEvent (Esc)                 → cancela la selección actual.
++    """
++
++    def __init__(self, canvas, on_roi_selected, iface):
++        """Inicializa la herramienta de ROI rectangular.
++
++        Args:
++            canvas: `QgsMapCanvas` sobre el que se va a dibujar.
++            on_roi_selected: callback que recibe un `QgsRectangle` con el
++                ROI seleccionado en coordenadas del CRS del canvas.
++            iface: interfaz de QGIS (usada para `messageBar`).
++        """
++        super().__init__(canvas)
++        # Guardamos referencias a canvas/iface/callback para usarlas en los
++        # event handlers — QgsMapTool no propaga el canvas a los métodos.
++        self.canvas = canvas
++        self.on_roi_selected = on_roi_selected
++        self.iface = iface
++
++        # Estado interno de la selección. start_point y end_point se llenan
++        # en press/move; is_selecting indica si el usuario está arrastrando
++        # actualmente el rectángulo.
++        self.start_point = None
++        self.end_point = None
++        self.is_selecting = False
++
++        # RubberBand visual: relleno semi-transparente verde para diferenciar
++        # del rojo que usa PolygonDrawTool (TIGS-43); así el usuario distingue
++        # las dos herramientas si quedan rastros simultáneos en el canvas.
++        self.rubber_band = QgsRubberBand(self.canvas, QgsWkbTypes.PolygonGeometry)
++        self.rubber_band.setColor(QColor(0, 200, 0, 80))
++        self.rubber_band.setStrokeColor(QColor(0, 150, 0, 220))
++        self.rubber_band.setWidth(2)
++
++    # ------------------------------------------------------------------ #
++    # Event handlers de QgsMapTool                                       #
++    # ------------------------------------------------------------------ #
++
++    def canvasPressEvent(self, event):
++        """Inicia la selección al presionar clic izquierdo.
++
++        El botón derecho cancela la selección en curso para mantener la
++        UX consistente con otras herramientas de QGIS.
++        """
++        if event.button() != Qt.LeftButton:
++            self._reset()
++            return
++
++        # toMapCoordinates convierte píxeles del canvas a coordenadas del
++        # CRS del proyecto, que es lo que necesita el bbox para que sea
++        # válido sobre el raster activo.
++        self.start_point = self.toMapCoordinates(event.pos())
++        self.end_point = self.start_point
++        self.is_selecting = True
++
++        # Limpiar cualquier rectángulo previo antes de empezar uno nuevo.
++        self.rubber_band.reset(QgsWkbTypes.PolygonGeometry)
++
++    def canvasMoveEvent(self, event):
++        """Actualiza el rectángulo visual mientras el usuario arrastra."""
++        if not self.is_selecting or self.start_point is None:
++            return
++
++        # Esquina opuesta al punto inicial — recalculamos en cada move
++        # porque QGIS dispara este evento con alta frecuencia y queremos
++        # un feedback fluido.
++        self.end_point = self.toMapCoordinates(event.pos())
++        self._actualizar_rubber_band()
++
++    def canvasReleaseEvent(self, event):
++        """Finaliza la selección al soltar el clic izquierdo."""
++        if event.button() != Qt.LeftButton or not self.is_selecting:
++            return
++
++        self.end_point = self.toMapCoordinates(event.pos())
++        self.is_selecting = False
++
++        # Construir el QgsRectangle: normalized() garantiza que x1<=x2 e
++        # y1<=y2 sin importar la dirección del arrastre (puede ser cualquiera
++        # de las 4 diagonales).
++        rect = QgsRectangle(self.start_point, self.end_point).normalized()
++
++        # Validar que la selección tenga área no nula. Un clic simple sin
++        # arrastre produciría un rectángulo degenerado (ancho/alto = 0).
++        if rect.width() <= 0 or rect.height() <= 0:
++            self.iface.messageBar().pushMessage(
++                "GeoGlyph",
++                "Selección inválida: arrastra para definir un rectángulo.",
++                level=1,
++                duration=3,
++            )
++            self._reset()
++            return
++
++        # Invocar callback con el rectángulo seleccionado. La rubber band
++        # se mantiene visible hasta que se desactive la herramienta — útil
++        # para que el usuario vea qué área se envió al backend.
++        self.on_roi_selected(rect)
++
++    def keyPressEvent(self, event):
++        """Cancela la selección actual al presionar Escape."""
++        if event.key() == Qt.Key_Escape:
++            self._reset()
++
++    def deactivate(self):
++        """Limpia la rubber band al desactivar la herramienta.
++
++        QGIS llama este método cuando el usuario cambia a otra herramienta
++        del canvas. Sin esto, el rectángulo verde quedaría dibujado
++        permanentemente.
++        """
++        self._reset()
++        super().deactivate()
++
++    # ------------------------------------------------------------------ #
++    # Helpers privados                                                   #
++    # ------------------------------------------------------------------ #
++
++    def _actualizar_rubber_band(self):
++        """Redibuja la rubber band con el rectángulo actual.
++
++        Construimos un polígono con las 4 esquinas porque
++        QgsWkbTypes.PolygonGeometry requiere geometría poligonal (no existe
++        un tipo nativo "rectángulo" en Qgs). Las esquinas se recalculan
++        desde start_point y end_point.
++        """
++        if self.start_point is None or self.end_point is None:
++            return
++
++        x1, y1 = self.start_point.x(), self.start_point.y()
++        x2, y2 = self.end_point.x(), self.end_point.y()
++
++        # 4 esquinas en orden CCW para que el polígono sea válido.
++        corners = [
++            QgsPointXY(x1, y1),
++            QgsPointXY(x2, y1),
++            QgsPointXY(x2, y2),
++            QgsPointXY(x1, y2),
++        ]
++        geom = QgsGeometry.fromPolygonXY([corners])
++
++        # setToGeometry reemplaza la rubber band con la nueva geometría —
++        # más simple que addPoint() iterativo y evita parpadeo en pantalla.
++        self.rubber_band.setToGeometry(geom, None)
++
++    def _reset(self):
++        """Limpia el estado interno y la rubber band."""
++        self.start_point = None
++        self.end_point = None
++        self.is_selecting = False
++        self.rubber_band.reset(QgsWkbTypes.PolygonGeometry)
+-- 
+2.34.1
+

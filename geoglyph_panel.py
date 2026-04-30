@@ -95,6 +95,16 @@ class GeoGlyphPanel(QDockWidget):
         )
         layout.addWidget(self.btn_dibujar)
 
+        # TIGS-53: botón para seleccionar un ROI rectangular y enviarlo al
+        # backend (POST /infer). Se ubica junto a "Dibujar polígono" porque
+        # ambos botones activan herramientas de selección sobre el canvas.
+        self.btn_roi = QPushButton("Seleccionar ROI (rect)")
+        self.btn_roi.setToolTip(
+            "Activa la herramienta de selección rectangular: "
+            "arrastra para definir un ROI y enviar a /infer en el backend"
+        )
+        layout.addWidget(self.btn_roi)
+
         btn_importar = QPushButton("Importar detecciones")
         btn_importar.setToolTip(
             "Importa detecciones en formato GeoJSON o probability map TIFF (próximamente)")
