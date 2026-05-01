@@ -45,6 +45,19 @@ class EnhanceRequest(BaseModel):
         return v
 
 
+class InferRequest(BaseModel):
+    bbox: list[float]
+    image_path: str | None = None
+    crs_epsg: int | None = None
+
+    @field_validator('bbox')
+    def bbox_debe_tener_4_valores(cls, v):
+        if len(v) != 4:
+            raise ValueError(
+                'bbox debe tener exactamente 4 valores: [x1, y1, x2, y2]')
+        return v
+
+
 # Endpoint que recibe las coordenadas y la banda a realzar
 @app.post("/enhance")
 def enhance(request: EnhanceRequest):
@@ -64,6 +77,38 @@ def enhance(request: EnhanceRequest):
         "processing_time_ms": round(processing_time_ms, 2)
     }
 
+
+@app.post("/infer")
+def infer(request: InferRequest):
+    inicio = time.time()
+
+    x1, y1, x2, y2 = request.bbox
+    polygon = [
+        [x1, y1],
+        [x2, y1],
+        [x2, y2],
+        [x1, y2],
+        [x1, y1],
+    ]
+
+    timestamp = datetime.now().isoformat()
+    processing_time_ms = (time.time() - inicio) * 1000
+
+    return {
+        "status": "ok",
+        "detections": [
+            {
+                "polygon": polygon,
+                "confidence": 0.92,
+            }
+        ],
+        "model_version": "mock-sam-v1",
+        "timestamp": timestamp,
+        "processing_time_ms": round(processing_time_ms, 2),
+        "image_path": request.image_path,
+        "crs_epsg": request.crs_epsg,
+    }
+
 # para ejecutar servidor:
 # instalar dependencias: pip install -r requirements.txt
 # Ejecutar: uvicorn main:app --reload
@@ -71,4 +116,5 @@ def enhance(request: EnhanceRequest):
 # http://localhost:8000/health
 # http://localhost:8000/info
 # http://localhost:8000/enhance
+# http://localhost:8000/infer
 # En http://localhost:8000/docs se pueden revisar todos los endpoints
