@@ -419,6 +419,24 @@ class GeoGlyph:
         )
         self.panel.btn_inferencia.setEnabled(True)
 
+        # TIGS 57 - Lógica para devolver el score de confianza ─────────────────────────────
+        detecciones = body.get("detections", [])  # Esta es la lista de detecciones del backend
+        if detecciones:
+            confianza = detecciones[0].get("confidence", None)
+            if confianza is not None:
+                self.panel.lbl_confianza.setText(f"Confianza: {confianza * 100:.0f}%")  # Confianza de decimal a %
+                self.panel.lbl_confianza.setStyleSheet(
+                    "color: green; font-size: 10px; margin-left: 4px;"  # Verde si es >= 70%, naranja si es menor
+                    if confianza >= 0.7
+                    else "color: orange; font-size: 10px; margin-left: 4px;"
+                )
+        else:
+            # Si no hay detecciones, resetear el label
+            self.panel.lbl_confianza.setText("Confianza: sin detecciones")
+            self.panel.lbl_confianza.setStyleSheet(
+                "color: gray; font-size: 10px; margin-left: 4px;"
+            )
+
     def _on_inferencia_error(self, msg):
         """Callback ejecutado en el hilo principal cuando el worker falla."""
         self.panel.lbl_status.setText(f"Error: {msg}")
