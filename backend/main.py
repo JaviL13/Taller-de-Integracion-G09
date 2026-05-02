@@ -13,14 +13,12 @@ from typing import Optional
 
 app = FastAPI()  # crea el servidor
 
-
 @app.get("/health")  # url, primer endpoint
 def health():
     return {  # fastapi automáticamente lo convierte a json
         "status": "ok",
         "version": "1.0"
     }
-
 
 @app.get("/info")  # url, segundo endpoint
 def info():
@@ -29,7 +27,6 @@ def info():
     }
 
 # Define qué datos debe enviar el plugin al servidor para solicitar un realce
-
 
 class EnhanceRequest(BaseModel):
     # lista de 4 números que representan las coordenadas
@@ -64,7 +61,6 @@ def enhance(request: EnhanceRequest):
         "processing_time_ms": round(processing_time_ms, 2)
     }
 
-
 # ---------------------------------------------------------------------------
 # POST /infer  (TIGS-49)
 #
@@ -85,7 +81,6 @@ INFER_MOCK_MODEL_VERSION = "sam_mock_v0"
 # Score fijo del mock. Lo importante es que el cliente sepa parsearlo y
 # mostrarlo en la UI; el valor real lo definirá SAM cuando llegue.
 INFER_MOCK_CONFIDENCE = 0.87
-
 
 class InferRequest(BaseModel):
     """ROI sobre la cual el cliente pide segmentación.
@@ -112,7 +107,6 @@ class InferRequest(BaseModel):
                 'bbox inválido: se requiere x1 < x2 y y1 < y2')
         return v
 
-
 class Detection(BaseModel):
     """Una máscara devuelta por el modelo.
 
@@ -125,7 +119,6 @@ class Detection(BaseModel):
     polygon: list[list[float]]
     confidence: float
 
-
 class InferResponse(BaseModel):
     status: str
     detections: list[Detection]
@@ -134,7 +127,6 @@ class InferResponse(BaseModel):
     processing_time_ms: float
     image_path: Optional[str] = None
     crs_epsg: Optional[int] = None
-
 
 def _generar_poligono_mock(bbox: list[float]) -> list[list[float]]:
     """Genera un rectángulo cerrado dentro del bbox, encogido al 50%.
@@ -157,7 +149,6 @@ def _generar_poligono_mock(bbox: list[float]) -> list[list[float]]:
         [cx - half_w, cy + half_h],
         [cx - half_w, cy - half_h],  # cierra el anillo
     ]
-
 
 # Endpoint /infer: recibe una ROI y devuelve una máscara mock con score.
 @app.post("/infer", response_model=InferResponse)
