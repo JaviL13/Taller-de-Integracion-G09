@@ -45,26 +45,6 @@ class EnhanceRequest(BaseModel):
                 'bbox debe tener exactamente 4 valores: [x1, y1, x2, y2]')
         return v
 
-
-class InferRequest(BaseModel):
-    """ROI sobre la cual el cliente pide segmentación."""
-
-    bbox: list[float]
-    image_path: Optional[str] = None
-    crs_epsg: Optional[int] = None
-
-    @field_validator('bbox')
-    def bbox_debe_ser_valido(cls, v):
-        if len(v) != 4:
-            raise ValueError(
-                'bbox debe tener exactamente 4 valores: [x1, y1, x2, y2]')
-        x1, y1, x2, y2 = v
-        if x1 >= x2 or y1 >= y2:
-            raise ValueError(
-                'bbox inválido: se requiere x1 < x2 y y1 < y2')
-        return v
-
-
 # Endpoint que recibe las coordenadas y la banda a realzar
 @app.post("/enhance")
 def enhance(request: EnhanceRequest):
