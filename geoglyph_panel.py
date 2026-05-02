@@ -21,6 +21,9 @@ class GeoGlyphPanel(QDockWidget):
 
         # Widget contenedor principal
         # No se pueden poner botones por separado, por eso un widget contenedor
+        from qgis.PyQt.QtWidgets import QScrollArea
+        scroll = QScrollArea()                          # Agregué un scroll para que se vea el panel completo
+        scroll.setWidgetResizable(True)
         container = QWidget()
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignTop)
@@ -138,6 +141,19 @@ class GeoGlyphPanel(QDockWidget):
         )
         layout.addWidget(self.lbl_seleccion)
 
+        # Label para mostrar el score de confianza de la detección
+        # El valor se actualiza desde geoglyph.py con el resultado del backend
+        self.lbl_confianza = QLabel("Confianza: —")
+        self.lbl_confianza.setStyleSheet(
+            "color: gray; font-size: 10px; margin-left: 4px;"
+        )
+        layout.addWidget(self.lbl_confianza)
+
+        # Campo de texto libre para observaciones
+        self.input_notas = QLineEdit()
+        self.input_notas.setPlaceholderText("Notas ...")
+        layout.addWidget(self.input_notas)
+
         self.btn_aprobar = QPushButton("Aprobar")
         self.btn_aprobar.setToolTip(
             "Marca la anotación seleccionada como aprobada (verde)"
@@ -173,7 +189,8 @@ class GeoGlyphPanel(QDockWidget):
 
         # Espaciador al final para más orden
         layout.addStretch()
-        self.setWidget(container)
+        scroll.setWidget(container)
+        self.setWidget(scroll)
 
     def _seccion_titulo(self, texto):
         # Crea una etiqueta de título de sección.

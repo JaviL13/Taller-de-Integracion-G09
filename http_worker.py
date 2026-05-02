@@ -31,10 +31,9 @@ class EnhanceWorker(QThread):
             band=1,
             parent=None):
         super().__init__(parent)
-        self.url = f"{base_url}/enhance"
+        self.url = f"{base_url}/infer"
         self.payload = {
             "bbox": bbox if bbox is not None else [0, 0, 100, 100],
-            "band": band,
         }
 
     def run(self):

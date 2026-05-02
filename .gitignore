@@ -5,6 +5,8 @@ __pycache__/
 # Entornos virtuales
 venv/
 backend/venv/
+.venv/
+annotations.gpkg
 
 # OS
 .DS_Store
