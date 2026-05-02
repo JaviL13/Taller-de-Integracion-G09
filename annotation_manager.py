@@ -66,6 +66,7 @@ class AnnotationManager:
             QgsField("status", QVariant.String),
             QgsField("origin", QVariant.String),   # humano o machine learning
             QgsField("timestamp", QVariant.String),   # fecha y hora
+            QgsField("score", QVariant.Double),
         ])
         layer.updateFields()
 
@@ -75,13 +76,14 @@ class AnnotationManager:
         self._aplicar_estilo_por_estado(layer)
         return layer
 
-    def agregar_anotacion(self, geometry: QgsGeometry) -> QgsFeature:
+    def agregar_anotacion(self, geometry: QgsGeometry, origin="human", score=None) -> QgsFeature:
         # Agrega una anotación con estado 'pending' a la capa
 
         feature = QgsFeature(self.layer.fields())
         feature.setGeometry(geometry)  # Es la geometría del polígono dibujado
         feature.setAttribute("status", "pending")
-        feature.setAttribute("origin", "human")
+        feature.setAttribute("origin", origin)
+        feature.setAttribute("score", score)
         feature.setAttribute(
             "timestamp", datetime.now(timezone.utc).isoformat()
         )

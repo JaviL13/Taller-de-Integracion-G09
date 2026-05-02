@@ -26,6 +26,7 @@ from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 from qgis.core import QgsRasterLayer
+from qgis.core import QgsGeometry, QgsPointXY
 
 from .resources import *  # noqa: F403, F401
 from .geoglyph_dialog import GeoGlyphDialog
@@ -35,6 +36,7 @@ from .decorrelation_dialog import DecorrelationStretchDialog
 from .annotation_tool import PolygonDrawTool  # Se importa para crear los dibujos
 from .annotation_manager import AnnotationManager
 from .annotation_state import StateTransitionError  # ← TIGS-64
+from .infer_worker import InferWorker
 
 import os.path
 
@@ -60,6 +62,7 @@ class GeoGlyph:
         self._worker = None  # referencia al worker activo (evita GC prematuro)
         self._draw_tool = None  # Para la funcionalidad de dibujo
         self._annotation_manager = None  # Para la funcionalidad de dibujo
+        self._infer_worker = None
 
     def tr(self, message):
         return QCoreApplication.translate('GeoGlyph', message)
@@ -103,6 +106,7 @@ class GeoGlyph:
         self.panel.btn_exportar.clicked.connect(self.exportar_capa_realzada)
         self.panel.btn_inferencia.clicked.connect(
             self._ejecutar_inferencia)  # ← nuevo
+        self.panel.btn_infer.clicked.connect(self._ejecutar_infer) #boton de renderizar
 
         # Conectar el boton "Aplicar Realce" del panel
         self.panel.btn_apply.clicked.connect(self.apply_enhancement)
@@ -557,3 +561,65 @@ class GeoGlyph:
                 level=2,  # error
                 duration=4,
             )
+    def _ejecutar_infer(self):
+        #Lanza InferWorker para llamar POST /infer y renderizar polígonos.
+        if self._infer_worker is not None and self._infer_worker.isRunning():
+            return
+
+        self.panel.btn_infer.setEnabled(False)
+        self.panel.lbl_status.setText("Estado: Conectando con backend...")
+        self.panel.lbl_status.setStyleSheet(
+            "color: orange; font-size: 10px; margin-left: 4px;"
+        )
+
+        layer = self.iface.activeLayer()
+        if layer is not None:
+            ext = layer.extent()
+            bbox = [ext.xMinimum(), ext.yMinimum(), ext.xMaximum(), ext.yMaximum()]
+        else:
+            bbox = [0, 0, 256, 256]
+
+        self._infer_worker = InferWorker(bbox=bbox)
+        self._infer_worker.finished.connect(self._on_infer_ok)
+        self._infer_worker.error.connect(self._on_infer_error)
+        self._infer_worker.start()
+
+    def _on_infer_ok(self, status_code, elapsed, detections):
+        #Callback cuando el backend responde con polígonos
+        self.panel.lbl_status.setText(
+            f"Estado: HTTP {status_code} · {elapsed:.2f}s · {len(detections)} detección(es)"
+        )
+        self.panel.lbl_status.setStyleSheet(
+            "color: green; font-size: 10px; margin-left: 4px;"
+        )
+        self.panel.btn_infer.setEnabled(True)
+
+        if not detections:
+            self.panel.lbl_score.setText("Confianza: sin detecciones")
+            return
+
+        primer_score = detections[0].get("confidence", 0)
+        self.panel.lbl_score.setText(f"Confianza: {primer_score:.0%}")
+
+        manager = self._get_or_create_annotation_manager()
+
+
+        for det in detections:
+            puntos = [QgsPointXY(p[0], p[1]) for p in det.get("polygon", [])]
+            if len(puntos) < 3:
+                continue
+            geometry = QgsGeometry.fromPolygonXY([puntos])
+            manager.agregar_anotacion(
+                geometry,
+                origin="ml",
+                score=det.get("confidence")
+            )
+
+    def _on_infer_error(self, msg):
+        #Callback cuando el backend falla
+        self.panel.lbl_status.setText(f"Error: {msg}")
+        self.panel.lbl_status.setStyleSheet(
+            "color: red; font-size: 10px; margin-left: 4px;"
+        )
+        self.panel.lbl_score.setText("Confianza: —")
+        self.panel.btn_infer.setEnabled(True)
