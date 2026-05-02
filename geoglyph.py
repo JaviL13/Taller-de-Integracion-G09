@@ -424,9 +424,9 @@ class GeoGlyph:
         if detecciones:
             confianza = detecciones[0].get("confidence", None)
             if confianza is not None:
-                self.panel.lbl_confianza.setText(f"Confianza: {confianza * 100:.0f}%")  # Paso la confianza de decial a %
+                self.panel.lbl_confianza.setText(f"Confianza: {confianza * 100:.0f}%")  # Confianza de decimal a %
                 self.panel.lbl_confianza.setStyleSheet(
-                    "color: green; font-size: 10px; margin-left: 4px;"     # Verde si confianza >= 70%, naranja si es menor
+                    "color: green; font-size: 10px; margin-left: 4px;"     # Verde si es >= 70%, naranja si es menor
                     if confianza >= 0.7
                     else "color: orange; font-size: 10px; margin-left: 4px;"
                 )
