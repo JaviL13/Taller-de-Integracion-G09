@@ -75,8 +75,8 @@ class AnnotationManager:
         QgsProject.instance().addMapLayer(layer)
 
         # TIGS 65: Archivo QML de respaldo
-        exito = self._aplicar_estilo_por_estado(layer) # Este es el estido definido en el código
-        qml_path = os.path.join(os.path.dirname(__file__), "annotations_style.qml") # Este es el QML de respaldo
+        exito = self._aplicar_estilo_por_estado(layer)  # Este es el estido definido en el código
+        qml_path = os.path.join(os.path.dirname(__file__), "annotations_style.qml")  # Este es el QML de respaldo
         
         if exito:                        # Si el estilo del código se aplica bien
             layer.triggerRepaint()       # Lo usa
