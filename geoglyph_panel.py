@@ -180,12 +180,28 @@ class GeoGlyphPanel(QDockWidget):
         self.btn_inferencia.setEnabled(True)  # habilitado en TIGS-42
         layout.addWidget(self.btn_inferencia)
 
+        #Boton para renderizar
+        self.btn_infer = QPushButton("Renderizar segmentación")
+        self.btn_infer.setToolTip(
+            "Llama a POST /infer y renderiza los polígonos resultantes como capa vectorial"
+        )
+        self.btn_infer.setEnabled(True)
+        layout.addWidget(self.btn_infer)
+
+
         # Label de estado de la última llamada HTTP
         self.lbl_status = QLabel("Estado: —")
         self.lbl_status.setWordWrap(True)
         self.lbl_status.setStyleSheet(
             "color: gray; font-size: 10px; margin-left: 4px;")
         layout.addWidget(self.lbl_status)
+
+        # Label de score de confianza que devuelve el backend después de la inferencia
+        self.lbl_score = QLabel("Confianza: —")
+        self.lbl_score.setWordWrap(True)
+        self.lbl_score.setStyleSheet("color: gray; font-size: 10px; margin-left: 4px;")
+        layout.addWidget(self.lbl_score)
+
 
         # Espaciador al final para más orden
         layout.addStretch()
