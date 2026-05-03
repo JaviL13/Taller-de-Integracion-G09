@@ -39,7 +39,7 @@ from .roi_select_tool import RectangularROITool  # TIGS-53
 from .infer_worker import InferWorker  # TIGS-53
 from .raster_crop import extract_raster_crop  # TIGS-53
 from .annotation_state import StateTransitionError  # ← TIGS-64
-from .infer_worker import InferWorker
+
 
 import os.path
 
@@ -111,7 +111,7 @@ class GeoGlyph:
         self.panel.btn_exportar.clicked.connect(self.exportar_capa_realzada)
         self.panel.btn_inferencia.clicked.connect(
             self._ejecutar_inferencia)  # ← nuevo
-        self.panel.btn_infer.clicked.connect(self._ejecutar_infer) #boton de renderizar
+        self.panel.btn_infer.clicked.connect(self._ejecutar_infer)  # boton de renderizar
 
         # Conectar el boton "Aplicar Realce" del panel
         self.panel.btn_apply.clicked.connect(self.apply_enhancement)
@@ -129,7 +129,8 @@ class GeoGlyph:
         # ── TIGS-64: botones aprobar / rechazar ──────────────────────────
         self.panel.btn_aprobar.clicked.connect(self._aprobar_seleccion)
         self.panel.btn_rechazar.clicked.connect(self._rechazar_seleccion)
-
+        # Inicializar el annotation manager al cargar el plugin
+        self._get_or_create_annotation_manager() #Inicializar el anootation manageer al cargar el plugin
         # Agregar el panel a QGIS (lado derecho por defecto)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
 
@@ -457,6 +458,13 @@ class GeoGlyph:
         engancha la señal selectionChanged de la capa para refrescar el
         estado de los botones aprobar/rechazar (TIGS-64).
         """
+        # Si el manager existe pero la capa fue eliminada, resetear
+        if self._annotation_manager is not None:
+            try:
+                # Intentar acceder a la capa — si fue eliminada lanza RuntimeError
+                _ = self._annotation_manager.layer.id()
+            except RuntimeError:
+                self._annotation_manager = None
         if self._annotation_manager is None:
             canvas = self.iface.mapCanvas()
             crs = canvas.mapSettings().destinationCrs()
@@ -608,7 +616,10 @@ class GeoGlyph:
             { status, detections[{polygon, confidence}], model_version,
               timestamp, processing_time_ms }
         """
+        
         detections = body.get("detections", []) if isinstance(body, dict) else []
+        print(f"DEBUG detections: {detections}")
+        print(f"DEBUG body: {body}")
         n = len(detections)
         # Mostramos en el label de estado el primer score (orientativo) +
         # versión del modelo para distinguir mock vs SAM real.
@@ -626,6 +637,21 @@ class GeoGlyph:
         self.panel.lbl_status.setStyleSheet(
             "color: green; font-size: 10px; margin-left: 4px;"
         )
+        self.panel.btn_infer.setEnabled(True)
+        primer_score = detections[0].get("confidence", 0) if detections else 0
+        self.panel.lbl_score.setText(f"Confianza: {primer_score:.0%}" if detections else "Confianza: sin detecciones")
+        # Convertir polígonos del backend a anotaciones en QGIS
+        manager = self._get_or_create_annotation_manager()
+        for det in detections:
+            puntos = [QgsPointXY(p[0], p[1]) for p in det.get("polygon", [])]
+            if len(puntos) < 3:
+                continue
+            geometry = QgsGeometry.fromPolygonXY([puntos])
+            manager.agregar_anotacion(
+                geometry,
+                origin="ml",
+                score=det.get("confidence")
+            )
 
     def _on_infer_error(self, msg):
         """Callback de error del worker /infer.
@@ -643,6 +669,8 @@ class GeoGlyph:
         self.panel.lbl_status.setStyleSheet(
             "color: red; font-size: 10px; margin-left: 4px;"
         )
+        self.panel.btn_infer.setEnabled(True)
+        self.panel.lbl_score.setText("Confianza: —")
 
         # QMessageBox modal pero sin bloquear el resto del plugin: deja
         # claro al usuario que la inferencia falló y que aún puede seguir
@@ -734,8 +762,9 @@ class GeoGlyph:
                 level=2,  # error
                 duration=4,
             )
+
     def _ejecutar_infer(self):
-        #Lanza InferWorker para llamar POST /infer y renderizar polígonos.
+        # Lanza InferWorker para llamar POST /infer y renderizar polígonos.
         if self._infer_worker is not None and self._infer_worker.isRunning():
             return
 
@@ -756,44 +785,3 @@ class GeoGlyph:
         self._infer_worker.finished.connect(self._on_infer_ok)
         self._infer_worker.error.connect(self._on_infer_error)
         self._infer_worker.start()
-
-    def _on_infer_ok(self, status_code, elapsed, body):
-        detections = body.get("detections", [])
-        #Callback cuando el backend responde con polígonos
-        self.panel.lbl_status.setText(
-            f"Estado: HTTP {status_code} · {elapsed:.2f}s · {len(detections)} detección(es)"
-        )
-        self.panel.lbl_status.setStyleSheet(
-            "color: green; font-size: 10px; margin-left: 4px;"
-        )
-        self.panel.btn_infer.setEnabled(True)
-
-        if not detections:
-            self.panel.lbl_score.setText("Confianza: sin detecciones")
-            return
-
-        primer_score = detections[0].get("confidence", 0)
-        self.panel.lbl_score.setText(f"Confianza: {primer_score:.0%}")
-
-        manager = self._get_or_create_annotation_manager()
-
-
-        for det in detections:
-            puntos = [QgsPointXY(p[0], p[1]) for p in det.get("polygon", [])]
-            if len(puntos) < 3:
-                continue
-            geometry = QgsGeometry.fromPolygonXY([puntos])
-            manager.agregar_anotacion(
-                geometry,
-                origin="ml",
-                score=det.get("confidence")
-            )
-
-    def _on_infer_error(self, msg):
-        #Callback cuando el backend falla
-        self.panel.lbl_status.setText(f"Error: {msg}")
-        self.panel.lbl_status.setStyleSheet(
-            "color: red; font-size: 10px; margin-left: 4px;"
-        )
-        self.panel.lbl_score.setText("Confianza: —")
-        self.panel.btn_infer.setEnabled(True)
