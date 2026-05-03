@@ -130,7 +130,7 @@ class GeoGlyph:
         self.panel.btn_aprobar.clicked.connect(self._aprobar_seleccion)
         self.panel.btn_rechazar.clicked.connect(self._rechazar_seleccion)
         # Inicializar el annotation manager al cargar el plugin
-        self._get_or_create_annotation_manager() #Inicializar el anootation manageer al cargar el plugin
+        self._get_or_create_annotation_manager()  # Inicializar el anootation manageer al cargar el plugin
         # Agregar el panel a QGIS (lado derecho por defecto)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
 
@@ -616,7 +616,6 @@ class GeoGlyph:
             { status, detections[{polygon, confidence}], model_version,
               timestamp, processing_time_ms }
         """
-        
         detections = body.get("detections", []) if isinstance(body, dict) else []
         print(f"DEBUG detections: {detections}")
         print(f"DEBUG body: {body}")
