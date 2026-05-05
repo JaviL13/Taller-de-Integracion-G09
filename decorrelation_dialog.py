@@ -295,6 +295,10 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
             )
             return
         QgsProject.instance().addMapLayer(layer)
+        self.iface.setActiveLayer(layer)
+        canvas = self.iface.mapCanvas()
+        canvas.setExtent(layer.extent())
+        canvas.refresh()
         self.layer_combo.setLayer(layer)
 
     def _browse_output(self):

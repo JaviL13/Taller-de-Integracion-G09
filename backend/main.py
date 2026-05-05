@@ -2,7 +2,7 @@
 # python -m venv venv
 # venv\Scripts\activate
 
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 import sys
 # valida automáticamente los datos que llegan al endpoint
 from pydantic import BaseModel, field_validator
@@ -10,8 +10,38 @@ from pydantic import BaseModel, field_validator
 from datetime import datetime, timezone
 import time
 from typing import Optional
+import json
+import base64
+import io
+from contextlib import asynccontextmanager
 
-app = FastAPI()  # crea el servidor
+# Importar el wrapper de SAM
+from sam_wrapper import initialize_sam, run_sam
+import numpy as np
+from PIL import Image, UnidentifiedImageError
+
+# ── Startup del servidor: cargar el modelo SAM UNA SOLA VEZ ────────────
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan de FastAPI: inicializa SAM al startup y limpia al shutdown."""
+    # Startup
+    print("[STARTUP] Inicializando modelo MobileSAM...")
+    try:
+        initialize_sam()
+        print("[STARTUP] ✓ Modelo SAM cargado exitosamente")
+    except Exception as e:
+        print(f"[STARTUP] ✗ Error cargando SAM: {e}")
+        raise
+
+    yield  # La aplicación corre aquí
+
+    # Cleanup (opcional — SAM se limpia automáticamente)
+    print("[SHUTDOWN] Limpiando recursos...")
+
+
+app = FastAPI(lifespan=lifespan)  # crea el servidor
 
 
 @app.get("/health")  # url, primer endpoint
@@ -67,123 +97,107 @@ def enhance(request: EnhanceRequest):
 
 
 # ---------------------------------------------------------------------------
-# POST /infer  (TIGS-49)
+# POST /infer  (TIGS-70)
 #
-# Endpoint que recibe una ROI (Region Of Interest) y devuelve una máscara
-# mock + score de confianza. Permite que el cliente HTTP del plugin pueda
-# integrarse end-to-end con el backend SIN tener SAM realmente conectado.
-# La integración real con SAM se hará en otro ticket; este endpoint queda
-# como contrato estable para que ambos lados puedan avanzar en paralelo.
+# Endpoint que recibe una imagen y opcionalmente puntos de prompt, ejecuta
+# MobileSAM, y devuelve la máscara binaria en base64 + score de confianza.
+#
+# Entrada:
+#   - image: archivo de imagen (multipart/form-data)
+#   - points: opcional, JSON array de puntos [[x1, y1], [x2, y2], ...]
+#   - labels: opcional, JSON array de labels [1, 1, ...] (1=foreground, 0=background)
+#
+# Salida:
+#   - mask_b64: máscara binaria (PNG) codificada en base64
+#   - confidence: float en [0, 1], score del modelo
+#   - width, height: dimensiones de la imagen
 # ---------------------------------------------------------------------------
-
-# Identificador del modelo mock. Cuando se conecte SAM real, esta constante
-# cambia (p.ej. "sam_vit_h_v1"). El valor se devuelve en cada respuesta y
-# se persiste en el campo model_version del .gpkg (ver TIGS-45) para que el
-# equipo pueda distinguir detecciones generadas durante desarrollo vs. las
-# del modelo real.
-INFER_MOCK_MODEL_VERSION = "sam_mock_v0"
-
-# Score fijo del mock. Lo importante es que el cliente sepa parsearlo y
-# mostrarlo en la UI; el valor real lo definirá SAM cuando llegue.
-INFER_MOCK_CONFIDENCE = 0.87
-
-
-class InferRequest(BaseModel):
-    """ROI sobre la cual el cliente pide segmentación.
-
-    bbox      coords del rectángulo [x1, y1, x2, y2] en el CRS del cliente.
-    image_path opcional, ruta a la imagen procesada (trazabilidad y, cuando
-              llegue SAM real, lo necesitará para abrir el archivo).
-    crs_epsg  opcional, EPSG del CRS en que vienen las coords del bbox.
-    """
-    bbox: list[float]
-    image_path: Optional[str] = None
-    crs_epsg: Optional[int] = None
-
-    # Hay que verificar que bbox tenga exactamente 4 coordenadas y que
-    # x1 < x2, y1 < y2. Si no, FastAPI responde automáticamente con 422.
-    @field_validator('bbox')
-    def bbox_debe_ser_valido(cls, v):
-        if len(v) != 4:
-            raise ValueError(
-                'bbox debe tener exactamente 4 valores: [x1, y1, x2, y2]')
-        x1, y1, x2, y2 = v
-        if x1 >= x2 or y1 >= y2:
-            raise ValueError(
-                'bbox inválido: se requiere x1 < x2 y y1 < y2')
-        return v
-
-
-class Detection(BaseModel):
-    """Una máscara devuelta por el modelo.
-
-    polygon    lista de [x, y] en el mismo CRS que el bbox de entrada.
-               El polígono está cerrado (primer punto == último), que es
-               lo que espera QgsGeometry.fromPolygonXY del cliente y lo
-               que persiste el .gpkg.
-    confidence score del modelo en [0, 1].
-    """
-    polygon: list[list[float]]
-    confidence: float
 
 
 class InferResponse(BaseModel):
+    """Respuesta del endpoint /infer con máscara y confianza."""
     status: str
-    detections: list[Detection]
-    model_version: str
-    timestamp: str
-    processing_time_ms: float
-    image_path: Optional[str] = None
-    crs_epsg: Optional[int] = None
+    mask_b64: str  # Máscara PNG en base64
+    confidence: float
+    width: int
+    height: int
 
 
-def _generar_poligono_mock(bbox: list[float]) -> list[list[float]]:
-    """Genera un rectángulo cerrado dentro del bbox, encogido al 50%.
-
-    La forma es determinista (mismo input → mismo output) para que los
-    tests puedan asertar la geometría exacta, y queda siempre dentro del
-    bbox de entrada para que sea una anotación válida cuando el cliente
-    la persista.
-    """
-    x1, y1, x2, y2 = bbox
-    cx = (x1 + x2) / 2
-    cy = (y1 + y2) / 2
-    # Cada lado del polígono mock = 50% del lado del bbox correspondiente.
-    half_w = (x2 - x1) * 0.25
-    half_h = (y2 - y1) * 0.25
-    return [
-        [cx - half_w, cy - half_h],
-        [cx + half_w, cy - half_h],
-        [cx + half_w, cy + half_h],
-        [cx - half_w, cy + half_h],
-        [cx - half_w, cy - half_h],  # cierra el anillo
-    ]
-
-
-# Endpoint /infer: recibe una ROI y devuelve una máscara mock con score.
 @app.post("/infer", response_model=InferResponse)
-def infer(request: InferRequest):
+async def infer(
+    image: UploadFile = File(...),
+    points: Optional[str] = Form(None),
+    labels: Optional[str] = Form(None),
+):
+    """
+    Ejecuta SAM sobre una imagen con puntos de prompt opcionales.
+
+    Args:
+        image: archivo de imagen (PNG, JPEG, etc.)
+        points: JSON string con array de puntos [[x, y], ...] o None
+        labels: JSON string con array de labels [1, 1, ...] o None
+                Si no se pasa, todos los puntos son foreground (1)
+    """
     inicio = time.time()
 
-    polygon = _generar_poligono_mock(request.bbox)
-    detections = [
-        Detection(polygon=polygon, confidence=INFER_MOCK_CONFIDENCE),
-    ]
+    # 1. Leer imagen del upload
+    image_data = await image.read()
+    try:
+        image_pil = Image.open(io.BytesIO(image_data))
+    except UnidentifiedImageError as e:
+        print(f"[ERROR /infer] UnidentifiedImageError: {e}")
+        raise HTTPException(status_code=400, detail="Archivo de imagen inválido")
 
-    # ISO-8601 con sufijo Z explícito (UTC). datetime.utcnow() está
-    # deprecated en Python 3.12, por eso se usa now(timezone.utc).
-    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    # Asegurar que es RGB (convertir si es RGBA, escala de grises, etc.)
+    if image_pil.mode != 'RGB':
+        image_pil = image_pil.convert('RGB')
+
+    image_array = np.array(image_pil)  # (H, W, 3)
+    height, width = image_array.shape[:2]
+
+    # 2. Parsear puntos y labels si se enviaron
+    points_array = None
+    labels_array = None
+
+    if points is not None:
+        try:
+            points_list = json.loads(points)
+            points_array = np.array(points_list, dtype=np.float32)
+        except (json.JSONDecodeError, ValueError):
+            raise HTTPException(status_code=422, detail="Formato de 'points' inválido. Espera JSON: [[x1, y1], ...]")
+
+    if labels is not None:
+        try:
+            labels_list = json.loads(labels)
+            labels_array = np.array(labels_list, dtype=np.int32)
+        except (json.JSONDecodeError, ValueError):
+            raise HTTPException(status_code=422, detail="Formato de 'labels' inválido. Espera JSON: [1, 1, ...]")
+
+    # 3. Ejecutar SAM
+    try:
+        mask, confidence = run_sam(image_array, points=points_array, labels=labels_array)
+    except Exception as e:
+        print(f"[ERROR /infer] {type(e).__name__}: {e}")
+        # Si el modelo no está inicializado, devolver 500
+        raise HTTPException(status_code=500, detail=f"Error de inferencia: {type(e).__name__}: {str(e)[:200]}")
+
+    # 4. Codificar máscara a PNG base64
+    mask_pil = Image.fromarray(mask, mode='L')  # Máscara grayscale
+    mask_bytes = io.BytesIO()
+    mask_pil.save(mask_bytes, format='PNG')
+    mask_b64 = base64.b64encode(mask_bytes.getvalue()).decode('utf-8')
+
+    # 5. Armar respuesta
     processing_time_ms = round((time.time() - inicio) * 1000, 2)
 
-    return InferResponse(
-        status="ok",
-        detections=detections,
-        model_version=INFER_MOCK_MODEL_VERSION,
-        timestamp=timestamp,
-        processing_time_ms=processing_time_ms,
-        image_path=request.image_path,
-        crs_epsg=request.crs_epsg,
-    )
+    return {
+        "status": "ok",
+        "mask_b64": mask_b64,
+        "confidence": float(confidence),
+        "width": width,
+        "height": height,
+    }
+
 
 # para ejecutar servidor:
 # instalar dependencias: pip install -r requirements.txt

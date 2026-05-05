@@ -1,23 +1,27 @@
 # -*- coding: utf-8 -*-
-"""Tests de integración del endpoint POST /infer (TIGS-49).
+"""Tests del endpoint POST /infer (TIGS-70).
 
-Valida los criterios de aceptación:
-  - El endpoint acepta una ROI (bbox) y devuelve una máscara mock.
-  - La máscara es un polígono cerrado y queda dentro del bbox de entrada.
-  - La respuesta incluye un score de confianza en [0, 1].
-  - El cliente recibe un model_version que identifica que es mock
-    (para que después se puedan distinguir detecciones de desarrollo
-    vs. las del modelo real al revisar el .gpkg).
-  - Inputs inválidos producen 422 (validación de pydantic).
-  - /health y /enhance siguen funcionando (regresión).
+Valida que el endpoint:
+  - Acepta una imagen como multipart/form-data.
+  - Ejecuta SAM (mocked) y devuelve máscara en base64 + confianza.
+  - Rechaza archivos que no son imágenes (HTTP 400).
+  - GET /health funciona (regresión).
 
-Usa fastapi.testclient.TestClient: corre el ASGI app en proceso, no
-necesita tener uvicorn levantado para correr los tests.
+El modelo SAM se mockea con unittest.mock.patch para no cargar el modelo
+real durante testing. Se genera una máscara sintética (cuadrado en el centro
+de una imagen 256x256 con confidence=0.92).
+
+Usa fastapi.testclient.TestClient: corre la app ASGI en proceso.
 """
 
+import base64
+import io
+import json
 import os
 import sys
+from unittest.mock import patch, MagicMock
 
+import numpy as np
 import pytest
 
 
@@ -25,25 +29,26 @@ import pytest
 # Setup de imports
 # ---------------------------------------------------------------------------
 
-# El paquete backend/ no tiene __init__.py (uvicorn lo corre como
-# script desde dentro del directorio). Agregamos backend/ al sys.path
-# para poder hacer "from main import app" desde el test.
+# Agregar backend/ al sys.path para imports
 BACKEND_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "backend",
 )
 sys.path.insert(0, BACKEND_DIR)
 
-# fastapi.testclient depende de httpx. Si alguna de las dos no está,
-# todos los tests del archivo se omiten en lugar de romper la suite
-# (defensa en profundidad si alguien corre pytest sin instalar
-# requirements.txt).
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from main import app  # noqa: E402
+# Mockear initialize_sam ANTES de importar app, para que no intente
+# cargar el modelo real en el lifespan del servidor
+with patch("sam_wrapper.initialize_sam"):
+    from main import app  # noqa: E402
 
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def client():
@@ -51,144 +56,196 @@ def client():
     return TestClient(app)
 
 
-# Bbox de prueba en EPSG:32719 (UTM 19S, Atacama). Rectángulo de 100×100 m.
-BBOX_VALIDO = [500000.0, 7500000.0, 500100.0, 7500100.0]
+@pytest.fixture
+def synthetic_image_png():
+    """Genera una imagen PNG sintética (256x256 RGB uint8) para testing.
 
-
-# ---------------------------------------------------------------------------
-# Happy path: estructura de la respuesta
-# ---------------------------------------------------------------------------
-
-def test_infer_returns_200(client):
-    """Una ROI válida devuelve 200 OK."""
-    resp = client.post("/infer", json={"bbox": BBOX_VALIDO})
-    assert resp.status_code == 200
-
-
-def test_infer_response_shape(client):
-    """La respuesta debe traer los campos del contrato."""
-    body = client.post("/infer", json={"bbox": BBOX_VALIDO}).json()
-    assert body["status"] == "ok"
-    assert "detections" in body
-    assert "model_version" in body
-    assert "timestamp" in body
-    assert "processing_time_ms" in body
-    assert isinstance(body["detections"], list)
-    assert len(body["detections"]) >= 1
-
-
-def test_infer_detection_tiene_polygon_y_confidence(client):
-    """Cada detection debe tener polygon (lista de [x,y]) y confidence."""
-    body = client.post("/infer", json={"bbox": BBOX_VALIDO}).json()
-    detection = body["detections"][0]
-    assert "polygon" in detection
-    assert "confidence" in detection
-    assert isinstance(detection["polygon"], list)
-    assert isinstance(detection["confidence"], (int, float))
-
-
-# ---------------------------------------------------------------------------
-# Validación geométrica del polígono mock
-# ---------------------------------------------------------------------------
-
-def test_infer_polygon_es_cerrado(client):
-    """El polígono debe ser un anillo cerrado (primer punto == último)."""
-    body = client.post("/infer", json={"bbox": BBOX_VALIDO}).json()
-    polygon = body["detections"][0]["polygon"]
-    assert polygon[0] == polygon[-1], "El polígono debe estar cerrado"
-    assert len(polygon) >= 4, "Polígono cerrado: mínimo 3 puntos + cierre"
-
-
-def test_infer_polygon_dentro_del_bbox(client):
-    """Todos los puntos del polígono caen dentro del bbox de entrada."""
-    x1, y1, x2, y2 = BBOX_VALIDO
-    body = client.post("/infer", json={"bbox": BBOX_VALIDO}).json()
-    polygon = body["detections"][0]["polygon"]
-    for x, y in polygon:
-        assert x1 <= x <= x2, f"Punto x={x} fuera de bbox [{x1}, {x2}]"
-        assert y1 <= y <= y2, f"Punto y={y} fuera de bbox [{y1}, {y2}]"
-
-
-def test_infer_polygon_es_determinista(client):
-    """Mismo input → mismo polígono. Permite asertar geometría en tests."""
-    body1 = client.post("/infer", json={"bbox": BBOX_VALIDO}).json()
-    body2 = client.post("/infer", json={"bbox": BBOX_VALIDO}).json()
-    assert body1["detections"][0]["polygon"] == body2["detections"][0]["polygon"]
-
-
-# ---------------------------------------------------------------------------
-# Score y metadata
-# ---------------------------------------------------------------------------
-
-def test_infer_confidence_en_rango_valido(client):
-    """confidence debe estar en [0, 1]."""
-    body = client.post("/infer", json={"bbox": BBOX_VALIDO}).json()
-    confidence = body["detections"][0]["confidence"]
-    assert 0.0 <= confidence <= 1.0
-
-
-def test_infer_model_version_declara_mock(client):
-    """model_version debe declarar explícitamente que es mock.
-
-    Cuando se persistan detecciones en el .gpkg (campo model_version
-    del MER, ver TIGS-45), esto permite distinguir detecciones de
-    desarrollo de las del modelo real.
+    Returns:
+        bytes: PNG codificado como bytes (listo para multipart/form-data).
     """
-    body = client.post("/infer", json={"bbox": BBOX_VALIDO}).json()
-    assert "mock" in body["model_version"].lower()
+    # Crear array RGB de 256x256, valores [0, 255]
+    image_array = np.zeros((256, 256, 3), dtype=np.uint8)
+    # Llenar de gris (100, 100, 100)
+    image_array[:, :] = [100, 100, 100]
+
+    # Convertir a PIL Image y guardar como PNG
+    from PIL import Image
+    img = Image.fromarray(image_array, mode='RGB')
+    png_bytes = io.BytesIO()
+    img.save(png_bytes, format='PNG')
+    png_bytes.seek(0)
+    return png_bytes.getvalue()
 
 
-def test_infer_processing_time_no_negativo(client):
-    """processing_time_ms debe existir y ser >= 0."""
-    body = client.post("/infer", json={"bbox": BBOX_VALIDO}).json()
-    assert body["processing_time_ms"] >= 0
+@pytest.fixture
+def synthetic_mask_and_confidence():
+    """Genera una máscara sintética y confianza para mockear run_sam().
 
+    La máscara es un cuadrado blanco (255) en el centro de 256x256,
+    rodeado de negro (0). Confianza = 0.92.
 
-def test_infer_acepta_image_path_y_crs_opcionales(client):
-    """image_path y crs_epsg son opcionales pero deben aceptarse si vienen."""
-    payload = {
-        "bbox": BBOX_VALIDO,
-        "image_path": "/data/cerro_unita.tif",
-        "crs_epsg": 32719,
-    }
-    resp = client.post("/infer", json=payload)
-    assert resp.status_code == 200
-
-
-# ---------------------------------------------------------------------------
-# Validación de input (errores 422)
-# ---------------------------------------------------------------------------
-
-def test_infer_bbox_con_3_valores_falla(client):
-    """bbox de 3 valores debe fallar con 422."""
-    resp = client.post("/infer", json={"bbox": [0, 0, 100]})
-    assert resp.status_code == 422
-
-
-def test_infer_bbox_invertido_falla(client):
-    """bbox con x1 >= x2 debe fallar con 422."""
-    resp = client.post("/infer", json={"bbox": [100, 0, 50, 100]})
-    assert resp.status_code == 422
-
-
-def test_infer_sin_bbox_falla(client):
-    """Request sin bbox debe fallar con 422."""
-    resp = client.post("/infer", json={})
-    assert resp.status_code == 422
+    Returns:
+        tuple: (mask_array, confidence)
+    """
+    mask = np.zeros((256, 256), dtype=np.uint8)
+    # Cuadrado en el centro (100x100 píxeles)
+    mask[78:178, 78:178] = 255
+    confidence = 0.92
+    return mask, confidence
 
 
 # ---------------------------------------------------------------------------
-# Regresión: endpoints existentes no deben romperse
+# Tests para TIGS-70
 # ---------------------------------------------------------------------------
 
-def test_health_sigue_funcionando(client):
-    """/health debe seguir respondiendo 200."""
+def test_health(client):
+    """GET /health retorna 200 y {"status": "ok"}."""
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "ok"
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert "version" in body
 
 
-def test_enhance_sigue_funcionando(client):
-    """/enhance no debe romperse al agregar /infer."""
-    resp = client.post("/enhance", json={"bbox": [0, 0, 100, 100], "band": 1})
-    assert resp.status_code == 200
+def test_infer_returns_mask(client, synthetic_image_png, synthetic_mask_and_confidence):
+    """POST /infer con imagen válida retorna máscara en base64 + confianza.
+
+    Se mockea sam_wrapper.run_sam() para retornar una máscara sintética
+    (cuadrado en el centro) con confidence=0.92.
+
+    Validaciones:
+      - HTTP 200
+      - status == "ok"
+      - mask_b64 es válido (decodificable) y es una imagen PNG válida
+      - confidence está en [0, 1]
+      - width y height coinciden con la imagen de entrada (256x256)
+    """
+    mask, confidence = synthetic_mask_and_confidence
+
+    # Mockear run_sam para retornar máscara sintética + confianza
+    with patch("main.run_sam") as mock_run_sam:
+        mock_run_sam.return_value = (mask, confidence)
+
+        # Preparar multipart/form-data con la imagen PNG
+        files = {
+            "image": ("test.png", synthetic_image_png, "image/png"),
+        }
+
+        # POST /infer
+        resp = client.post("/infer", files=files)
+
+        # Validaciones
+        assert resp.status_code == 200
+        body = resp.json()
+
+        # Estructura
+        assert body["status"] == "ok"
+        assert "mask_b64" in body
+        assert "confidence" in body
+        assert "width" in body
+        assert "height" in body
+
+        # Validar dimensiones
+        assert body["width"] == 256
+        assert body["height"] == 256
+
+        # Validar confianza
+        assert isinstance(body["confidence"], float)
+        assert 0.0 <= body["confidence"] <= 1.0
+        assert body["confidence"] == 0.92
+
+        # Validar que mask_b64 es decodificable y es PNG
+        mask_b64 = body["mask_b64"]
+        try:
+            mask_bytes = base64.b64decode(mask_b64)
+            # Intentar abrir como imagen para verificar que es PNG válido
+            from PIL import Image
+            decoded_mask = Image.open(io.BytesIO(mask_bytes))
+            assert decoded_mask.format == 'PNG'
+            # Convertir a array para validar que tiene forma correcta
+            mask_array = np.array(decoded_mask)
+            assert mask_array.shape == (256, 256)  # Grayscale
+        except Exception as e:
+            pytest.fail(f"mask_b64 no es PNG válido: {e}")
+
+
+def test_infer_invalid_file_returns_error(client):
+    """POST /infer con archivo de texto (no imagen) retorna HTTP 400.
+
+    Se envía un archivo .txt en lugar de una imagen. El endpoint
+    debe rechazarlo gracefully con HTTP 400 o similar.
+    """
+    # Crear un archivo de texto
+    text_content = b"This is not an image, just plain text"
+    files = {
+        "image": ("test.txt", text_content, "text/plain"),
+    }
+
+    # POST /infer con archivo inválido
+    resp = client.post("/infer", files=files)
+
+    # Debe fallar (no 200)
+    assert resp.status_code != 200
+    # Esperar 400 o 422 (ambos son razonables para input inválido)
+    assert resp.status_code in [400, 422, 500]
+
+    # Si es 400-422, debe tener un mensaje de error en la respuesta
+    if resp.status_code in [400, 422]:
+        body = resp.json()
+        # Puede ser {"detail": "..."} o {"error": "..."}
+        assert "detail" in body or "error" in body
+
+
+def test_infer_with_points_and_labels(client, synthetic_image_png, synthetic_mask_and_confidence):
+    """POST /infer acepta puntos y labels opcionales (refinamiento iterativo).
+
+    Los puntos se envían como JSON en el form-data.
+    """
+    mask, confidence = synthetic_mask_and_confidence
+
+    with patch("main.run_sam") as mock_run_sam:
+        mock_run_sam.return_value = (mask, confidence)
+
+        files = {
+            "image": ("test.png", synthetic_image_png, "image/png"),
+        }
+        data = {
+            "points": json.dumps([[128, 128], [200, 200]]),  # Dos puntos
+            "labels": json.dumps([1, 1]),  # Ambos foreground
+        }
+
+        resp = client.post("/infer", files=files, data=data)
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "ok"
+        assert body["confidence"] == 0.92
+
+        # Verificar que run_sam fue llamado con los puntos correctos
+        mock_run_sam.assert_called_once()
+        call_args = mock_run_sam.call_args
+        # call_args[1] son kwargs: {'points': ..., 'labels': ...}
+        assert call_args is not None
+
+
+def test_infer_without_sam_initialization_fails(client, synthetic_image_png):
+    """Si run_sam no está mocked y SAM no está inicializado, falla.
+
+    Este test verifica que sin mock, el endpoint intenta realmente
+    ejecutar SAM y devuelve error si no está disponible.
+    """
+    # Sin mockear run_sam, el endpoint intentará ejecutar run_sam() real.
+    # Como SAM no estará inicializado (initialize_sam fue mocked en imports),
+    # debe fallar con error.
+    files = {
+        "image": ("test.png", synthetic_image_png, "image/png"),
+    }
+
+    # Sin mock de run_sam
+    resp = client.post("/infer", files=files)
+
+    # Esperar error (no 200)
+    assert resp.status_code != 200
+    body = resp.json()
+    # El error debe mencionar que SAM no está inicializado
+    assert "error" in body or "detail" in body

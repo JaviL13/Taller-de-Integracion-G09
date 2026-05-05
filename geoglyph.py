@@ -37,11 +37,13 @@ from .annotation_tool import PolygonDrawTool  # Se importa para crear los dibujo
 from .annotation_manager import AnnotationManager
 from .roi_select_tool import RectangularROITool  # TIGS-53
 from .infer_worker import InferWorker  # TIGS-53
-from .raster_crop import extract_raster_crop  # TIGS-53
+from .sam_client import SamWorker  # TIGS-70: worker para ejecutar SAM real
+from .raster_crop import extract_raster_crop, extract_raster_pixels  # TIGS-53, TIGS-70
 from .annotation_state import StateTransitionError  # ← TIGS-64
 
 
 import os.path
+import numpy as np
 
 
 class GeoGlyph:
@@ -67,7 +69,7 @@ class GeoGlyph:
         self._annotation_manager = None  # Para la funcionalidad de dibujo
         self._roi_tool = None  # TIGS-53: herramienta de ROI rectangular
         self._infer_worker = None  # TIGS-53: worker async aiohttp para /infer
-        self._infer_worker = None
+        self._sam_worker = None  # TIGS-70: worker para ejecutar SAM real
 
     def tr(self, message):
         return QCoreApplication.translate('GeoGlyph', message)
@@ -153,6 +155,11 @@ class GeoGlyph:
         if self._infer_worker is not None and self._infer_worker.isRunning():
             self._infer_worker.quit()
             self._infer_worker.wait()
+
+        # TIGS-70: idem para el worker de SAM.
+        if self._sam_worker is not None and self._sam_worker.isRunning():
+            self._sam_worker.quit()
+            self._sam_worker.wait()
 
     def abrir_geotiff(self):
         # Abre el diálogo para cargar un GeoTIFF
@@ -396,8 +403,18 @@ class GeoGlyph:
         Lanza EnhanceWorker en un QThread para llamar POST /enhance
         sin bloquear el hilo principal de QGIS.
         """
-        # Evitar doble-click mientras hay una llamada en curso
+        # Evitar doble-click mientras hay una llamada en curso (tanto para /enhance como para SAM)
         if self._worker is not None and self._worker.isRunning():
+            return
+
+        # No permitir /enhance si hay una inferencia SAM en curso
+        if self._sam_worker is not None and self._sam_worker.isRunning():
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                "Ya hay una inferencia SAM en curso. Espera a que termine antes de ejecutar otra.",
+                level=1,
+                duration=3,
+            )
             return
 
         self.panel.btn_inferencia.setEnabled(False)
@@ -539,6 +556,9 @@ class GeoGlyph:
             )
             return
 
+        # Deshabilitar el botón para evitar múltiples selecciones concurrentes
+        self.panel.btn_roi.setEnabled(False)
+
         canvas = self.iface.mapCanvas()
         # Crear la herramienta y guardarla como atributo para evitar que el
         # GC la elimine — Qt requiere que el objeto siga vivo mientras esté
@@ -558,56 +578,77 @@ class GeoGlyph:
         )
 
     def _on_roi_seleccionado(self, rect):
-        """Callback que recibe el QgsRectangle seleccionado por el usuario.
+        """Callback que recibe el QgsRectangle seleccionado por el usuario (TIGS-70).
 
         Pasos:
           1. Extraer metadatos del recorte raster (bbox, image_path, EPSG).
-          2. Lanzar InferWorker (aiohttp) en hilo aparte.
-          3. Mostrar el estado en el panel hasta que termine el request.
-          4. Si el backend está caído, avisar pero NO bloquear la herramienta
-             de anotación manual (degradación controlada — DoD TIGS-53).
+          2. Extraer los píxeles de la imagen del ROI.
+          3. Lanzar SamWorker (httpx) en hilo aparte con la imagen.
+          4. Mostrar "Procesando con SAM..." hasta que termine.
+          5. Si el backend está caído, avisar pero NO bloquear la anotación manual
+             (degradación controlada — DoD TIGS-53, TIGS-70).
         """
         layer = self.iface.activeLayer()
 
         # 1. Extraer metadatos del recorte. Si la ROI cae fuera del raster
         # o la capa no es válida, el helper levanta ValueError → se avisa
-        # al usuario y se aborta sin lanzar la llamada HTTP.
+        # al usuario y se aborta.
         try:
             crop_info = extract_raster_crop(layer, rect)
         except ValueError as e:
             self.iface.messageBar().pushMessage(
                 "GeoGlyph", str(e), level=1, duration=4
             )
+            self.panel.btn_roi.setEnabled(True)  # Rehabilitar botón en error
+            return
+
+        # 2. Extraer los píxeles de la imagen (TIGS-70)
+        try:
+            image_array = extract_raster_pixels(layer, rect)
+        except ValueError as e:
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph", f"Error extrayendo píxeles: {str(e)}", level=2, duration=4
+            )
+            self.panel.btn_roi.setEnabled(True)  # Rehabilitar botón en error
             return
 
         # Evitar llamadas concurrentes al backend desde la misma sesión.
-        if self._infer_worker is not None and self._infer_worker.isRunning():
+        if self._sam_worker is not None and self._sam_worker.isRunning():
             self.iface.messageBar().pushMessage(
                 "GeoGlyph",
-                "Ya hay una inferencia en curso, espera a que termine.",
+                "Ya hay una inferencia SAM en curso, espera a que termine.",
                 level=1,
                 duration=3,
             )
+            self.panel.btn_roi.setEnabled(True)  # Rehabilitar botón, no se inició nueva inferencia
             return
 
-        # 2. Lanzar el worker async (aiohttp) en hilo aparte. La URL base
-        # se mantiene hardcoded igual que EnhanceWorker (TIGS-42); cuando
-        # exista un panel de configuración de backend se reusa allí.
+        # 3. Mantener el botón deshabilitado durante la inferencia y mostrar "Procesando con SAM..."
+        # El botón ya fue deshabilitado en _activar_herramienta_roi() y se mantendrá deshabilitado
+        # hasta que termine la inferencia en _on_sam_finished() o _on_sam_error()
         self.panel.lbl_status.setText(
-            f"Estado: enviando ROI ({crop_info['pixels_w']}x"
-            f"{crop_info['pixels_h']}px) a /infer..."
+            f"Estado: Procesando con SAM ({image_array.shape[1]}x"
+            f"{image_array.shape[0]}px)..."
         )
         self.panel.lbl_status.setStyleSheet(
             "color: orange; font-size: 10px; margin-left: 4px;"
         )
-        self._infer_worker = InferWorker(
-            bbox=crop_info["bbox"],
-            image_path=crop_info["image_path"],
-            crs_epsg=crop_info["crs_epsg"],
+
+        # 4. Lanzar SamWorker con la imagen (URL base configurable, default localhost)
+        # TODO: hacer la URL configurable desde un panel de configuración
+        self._sam_worker = SamWorker(
+            image=image_array,
+            url="http://localhost:8000",
+            points=None,  # Por ahora sin puntos de refinamiento
+            labels=None,
         )
-        self._infer_worker.finished.connect(self._on_infer_ok)
-        self._infer_worker.error.connect(self._on_infer_error)
-        self._infer_worker.start()
+        self._sam_worker.finished.connect(self._on_sam_finished)
+        self._sam_worker.error.connect(self._on_sam_error)
+
+        # Bloquear btn_inferencia mientras hay una inferencia SAM en curso
+        self.panel.btn_inferencia.setEnabled(False)
+
+        self._sam_worker.start()
 
     def _on_infer_ok(self, status_code, elapsed, body):
         """Callback ejecutado en el hilo principal cuando /infer responde OK.
@@ -680,6 +721,100 @@ class GeoGlyph:
             f"No se pudo enviar el ROI al backend:\n\n{msg}\n\n"
             "Puedes seguir trabajando con la anotación manual "
             "(\"Dibujar polígono\").",
+        )
+
+    # ── TIGS-70: handlers para SamWorker (SAM real) ────────────────────────
+
+    def _on_sam_finished(self, mask: np.ndarray, confidence: float):
+        """Callback ejecutado cuando SamWorker termina exitosamente.
+
+        Recibe la máscara binaria y el score de confianza del backend.
+
+        Args:
+            mask: np.ndarray de forma (H, W) con valores 0-255 (binaria).
+            confidence: float en [0, 1] que estima la confianza del modelo.
+        """
+        from qgis.core import QgsMessageLog, Qgis
+
+        # Habilitar los botones de ROI e inferencia
+        self.panel.btn_roi.setEnabled(True)
+        self.panel.btn_inferencia.setEnabled(True)
+
+        # Actualizar el score de confianza en el panel (reemplazando el 87% hardcodeado)
+        self.panel.lbl_score.setText(f"Confianza: {confidence * 100:.1f}%")
+        self.panel.lbl_score.setStyleSheet(
+            "color: green; font-size: 10px; margin-left: 4px;"
+            if confidence >= 0.7
+            else "color: orange; font-size: 10px; margin-left: 4px;"
+        )
+
+        # Mostrar estado de éxito en el panel
+        self.panel.lbl_status.setText(
+            f"Estado: SAM completado · confianza={confidence * 100:.1f}%"
+        )
+        self.panel.lbl_status.setStyleSheet(
+            "color: green; font-size: 10px; margin-left: 4px;"
+        )
+
+        # Loguear la máscara recibida (TIGS-70: por ahora solo log, conversión en TIGS-71)
+        QgsMessageLog.logMessage(
+            f"[TIGS-70] SAM ejecutado: máscara {mask.shape} recibida, "
+            f"confianza={confidence:.2f}",
+            "GeoGlyph",
+            level=Qgis.Info
+        )
+
+        # Debug: mostrar info de la máscara (se puede remover después)
+        n_pixels = (mask > 0).sum()
+        print(f"[TIGS-70] DEBUG SAM mask: shape={mask.shape}, "
+              f"foreground_pixels={n_pixels}, confidence={confidence}")
+
+    def _on_sam_error(self, msg: str):
+        """Callback ejecutado cuando SamWorker falla.
+
+        Se distingue entre errores de backend no disponible y errores
+        de inferencia para mostrar mensajes apropiados.
+
+        Args:
+            msg: mensaje de error del worker (p.ej. "HTTP 500: ...", "Backend no disponible").
+        """
+        from qgis.core import QgsMessageLog, Qgis
+
+        # Habilitar los botones de ROI e inferencia para que el usuario pueda reintentar
+        self.panel.btn_roi.setEnabled(True)
+        self.panel.btn_inferencia.setEnabled(True)
+
+        # Mostrar error en el panel
+        self.panel.lbl_status.setText(f"Error SAM: {msg}")
+        self.panel.lbl_status.setStyleSheet(
+            "color: red; font-size: 10px; margin-left: 4px;"
+        )
+
+        # Resetear el score de confianza
+        self.panel.lbl_score.setText("Confianza: —")
+
+        # Loguear el error en QgsMessageLog
+        if "no disponible" in msg.lower() or "http" in msg.lower():
+            # Backend no disponible o error HTTP
+            level = Qgis.Warning
+            prefix = "[TIGS-70] Backend SAM no disponible"
+        else:
+            # Error de inferencia
+            level = Qgis.Critical
+            prefix = "[TIGS-70] Error durante inferencia SAM"
+
+        QgsMessageLog.logMessage(
+            f"{prefix}: {msg}",
+            "GeoGlyph",
+            level=level
+        )
+
+        # Mostrar notificación al usuario en la message bar (no intrusiva)
+        self.iface.messageBar().pushMessage(
+            "GeoGlyph — Error SAM",
+            f"{msg}. Puedes reintentar seleccionando otro ROI o anotando manualmente.",
+            level=1,  # warning
+            duration=5
         )
 
     # ── TIGS-64: handlers de aprobar / rechazar ────────────────────────────

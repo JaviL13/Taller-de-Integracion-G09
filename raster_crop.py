@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-raster_crop.py — TIGS-53
+raster_crop.py — TIGS-53, TIGS-70
 
 Utilidades para extraer un recorte (crop) del raster activo dado un
 QgsRectangle de ROI seleccionado por el usuario.
@@ -13,6 +13,9 @@ Diseño:
         pixels_w   ancho en píxeles del recorte (referencial)
         pixels_h   alto en píxeles del recorte (referencial)
 
+  - `extract_raster_pixels(layer, rect)` (TIGS-70) devuelve la imagen real
+    como np.ndarray de forma (H, W, 3) [0, 255] uint8 RGB.
+
   El recorte real (los bytes del raster) NO se envía al endpoint /infer
   porque la versión actual del contrato (TIGS-49) sólo recibe metadatos
   (bbox + image_path + crs_epsg). Se calcula el ancho/alto en píxeles
@@ -21,6 +24,9 @@ Diseño:
 """
 
 from typing import Optional
+import os
+
+import numpy as np
 
 from qgis.core import (
     QgsCoordinateTransform,
@@ -125,3 +131,104 @@ def extract_raster_crop(layer: QgsRasterLayer, rect: QgsRectangle) -> dict:
         "pixels_w": pixels_w,
         "pixels_h": pixels_h,
     }
+
+
+def extract_raster_pixels(layer: QgsRasterLayer, rect: QgsRectangle) -> np.ndarray:
+    """Extrae los píxeles del raster en el ROI especificado (TIGS-70).
+
+    Devuelve un array numpy de forma (H, W, 3) con valores uint8 [0, 255]
+    correspondiendo a la imagen RGB recortada. Se reprojecta automáticamente
+    el ROI al CRS del raster si es necesario.
+
+    Args:
+        layer: Capa raster de QGIS.
+        rect:  QgsRectangle con la ROI en coordenadas del canvas.
+
+    Returns:
+        np.ndarray de forma (H, W, 3) uint8 RGB.
+
+    Raises:
+        ValueError: si no hay intersección o si la capa no es válida.
+    """
+    if layer is None or not isinstance(layer, QgsRasterLayer):
+        raise ValueError("La capa activa no es un raster válido.")
+
+    # Reproyectar ROI al CRS del raster (igual que en extract_raster_crop)
+    raster_crs = layer.crs()
+    canvas_crs = QgsProject.instance().crs()
+
+    if canvas_crs != raster_crs:
+        transform = QgsCoordinateTransform(
+            canvas_crs, raster_crs, QgsCoordinateTransformContext()
+        )
+        roi_in_raster_crs = transform.transformBoundingBox(rect)
+    else:
+        roi_in_raster_crs = QgsRectangle(rect)
+
+    # Validar intersección
+    if not roi_in_raster_crs.intersects(layer.extent()):
+        raise ValueError("La ROI seleccionada no intersecta el raster activo.")
+
+    roi_clipped = roi_in_raster_crs.intersect(layer.extent())
+
+    # QGIS puede devolver URIs con parámetros extra; para rasterio necesitamos
+    # una ruta local real al archivo fuente.
+    source_path = (layer.source() or "").split("|", 1)[0].strip()
+    if not source_path or not os.path.exists(source_path):
+        raise ValueError(
+            "No se pudo leer el archivo fuente del raster. "
+            "Solo se admiten capas raster locales para SAM."
+        )
+
+    # Rasterio lee el recorte directamente desde el archivo fuente usando el
+    # bounding box en coordenadas del CRS del raster.
+    try:
+        try:
+            import rasterio
+            from rasterio.enums import Resampling
+            from rasterio.windows import from_bounds
+        except ImportError as exc:
+            raise ValueError(
+                "rasterio no está instalado en el entorno de QGIS. "
+                "Instálalo para extraer el ROI del raster."
+            ) from exc
+
+        with rasterio.open(source_path) as src:
+            window = from_bounds(
+                roi_clipped.xMinimum(),
+                roi_clipped.yMinimum(),
+                roi_clipped.xMaximum(),
+                roi_clipped.yMaximum(),
+                transform=src.transform,
+            )
+
+            band_count = src.count
+            if band_count >= 3:
+                data = src.read(
+                    indexes=[1, 2, 3],
+                    window=window,
+                    out_shape=(3, max(1, int(round(window.height))), max(1, int(round(window.width)))),
+                    resampling=Resampling.nearest,
+                    boundless=True,
+                    fill_value=0,
+                )
+                image_array = np.transpose(data, (1, 2, 0))
+            else:
+                data = src.read(
+                    indexes=1,
+                    window=window,
+                    out_shape=(max(1, int(round(window.height))), max(1, int(round(window.width)))),
+                    resampling=Resampling.nearest,
+                    boundless=True,
+                    fill_value=0,
+                )
+                image_array = np.stack([data, data, data], axis=2)
+
+            # Asegurar uint8 para el backend SAM.
+            if image_array.dtype != np.uint8:
+                image_array = np.clip(image_array, 0, 255).astype(np.uint8)
+
+    except Exception as e:
+        raise ValueError(f"Error leyendo píxeles del raster: {e}") from e
+
+    return image_array
