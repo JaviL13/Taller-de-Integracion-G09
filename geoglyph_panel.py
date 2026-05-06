@@ -21,6 +21,9 @@ class GeoGlyphPanel(QDockWidget):
 
         # Widget contenedor principal
         # No se pueden poner botones por separado, por eso un widget contenedor
+        from qgis.PyQt.QtWidgets import QScrollArea
+        scroll = QScrollArea()                          # Agregué un scroll para que se vea el panel completo
+        scroll.setWidgetResizable(True)
         container = QWidget()
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignTop)
@@ -95,6 +98,16 @@ class GeoGlyphPanel(QDockWidget):
         )
         layout.addWidget(self.btn_dibujar)
 
+        # TIGS-53: botón para seleccionar un ROI rectangular y enviarlo al
+        # backend (POST /infer). Se ubica junto a "Dibujar polígono" porque
+        # ambos botones activan herramientas de selección sobre el canvas.
+        self.btn_roi = QPushButton("Seleccionar ROI (rect)")
+        self.btn_roi.setToolTip(
+            "Activa la herramienta de selección rectangular: "
+            "arrastra para definir un ROI y enviar a /infer en el backend"
+        )
+        layout.addWidget(self.btn_roi)
+
         btn_importar = QPushButton("Importar detecciones")
         btn_importar.setToolTip(
             "Importa detecciones en formato GeoJSON o probability map TIFF (próximamente)")
@@ -128,6 +141,19 @@ class GeoGlyphPanel(QDockWidget):
         )
         layout.addWidget(self.lbl_seleccion)
 
+        # Label para mostrar el score de confianza de la detección
+        # El valor se actualiza desde geoglyph.py con el resultado del backend
+        self.lbl_confianza = QLabel("Confianza: —")
+        self.lbl_confianza.setStyleSheet(
+            "color: gray; font-size: 10px; margin-left: 4px;"
+        )
+        layout.addWidget(self.lbl_confianza)
+
+        # Campo de texto libre para observaciones
+        self.input_notas = QLineEdit()
+        self.input_notas.setPlaceholderText("Notas ...")
+        layout.addWidget(self.input_notas)
+
         self.btn_aprobar = QPushButton("Aprobar")
         self.btn_aprobar.setToolTip(
             "Marca la anotación seleccionada como aprobada (verde)"
@@ -154,6 +180,14 @@ class GeoGlyphPanel(QDockWidget):
         self.btn_inferencia.setEnabled(True)  # habilitado en TIGS-42
         layout.addWidget(self.btn_inferencia)
 
+        # Boton para renderizar
+        self.btn_infer = QPushButton("Renderizar segmentación")
+        self.btn_infer.setToolTip(
+            "Llama a POST /infer y renderiza los polígonos resultantes como capa vectorial"
+        )
+        self.btn_infer.setEnabled(True)
+        layout.addWidget(self.btn_infer)
+
         # Label de estado de la última llamada HTTP
         self.lbl_status = QLabel("Estado: —")
         self.lbl_status.setWordWrap(True)
@@ -161,9 +195,16 @@ class GeoGlyphPanel(QDockWidget):
             "color: gray; font-size: 10px; margin-left: 4px;")
         layout.addWidget(self.lbl_status)
 
+        # Label de score de confianza que devuelve el backend después de la inferencia
+        self.lbl_score = QLabel("Confianza: —")
+        self.lbl_score.setWordWrap(True)
+        self.lbl_score.setStyleSheet("color: gray; font-size: 10px; margin-left: 4px;")
+        layout.addWidget(self.lbl_score)
+
         # Espaciador al final para más orden
         layout.addStretch()
-        self.setWidget(container)
+        scroll.setWidget(container)
+        self.setWidget(scroll)
 
     def _seccion_titulo(self, texto):
         # Crea una etiqueta de título de sección.

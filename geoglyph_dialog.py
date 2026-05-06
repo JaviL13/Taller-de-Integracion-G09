@@ -89,6 +89,13 @@ class GeoGlyphDialog(QtWidgets.QDialog, FORM_CLASS):
         # Agregar la capa al proyecto de QGIS
         QgsProject.instance().addMapLayer(layer)
 
+        # Dejarla activa y visible en el canvas para que el usuario la vea
+        # inmediatamente después de cargarla.
+        self.iface.setActiveLayer(layer)
+        canvas = self.iface.mapCanvas()
+        canvas.setExtent(layer.extent())
+        canvas.refresh()
+
         QtWidgets.QMessageBox.information(
             self,
             "Éxito",
