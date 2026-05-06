@@ -132,6 +132,8 @@ mklink /D "%APPDATA%\QGIS\QGIS3\profiles\default\python\plugins\GeoGlyph" "%USER
 
 ### Backend de inferencia (opcional)
 
+Para instrucciones detalladas de instalación y ejecución del backend SAM, consulte [backend/README.md](backend/README.md).
+
 El plugin puede conectarse a un servidor FastAPI que ejecute MobileSAM (una implementación ligera de SAM). A continuación se detallan los requisitos y los pasos recomendados para instalar y ejecutar el backend localmente.
 
 Recomendación general:
