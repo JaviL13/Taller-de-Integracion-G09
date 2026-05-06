@@ -132,14 +132,82 @@ mklink /D "%APPDATA%\QGIS\QGIS3\profiles\default\python\plugins\GeoGlyph" "%USER
 
 ### Backend de inferencia (opcional)
 
-El plugin puede conectarse a un servidor FastAPI para ejecutar inferencia con SAM. Para correrlo localmente:
+Para instrucciones detalladas de instalación y ejecución del backend SAM, consulte [backend/README.md](backend/README.md).
+
+El plugin puede conectarse a un servidor FastAPI que ejecute MobileSAM (una implementación ligera de SAM). A continuación se detallan los requisitos y los pasos recomendados para instalar y ejecutar el backend localmente.
+
+Recomendación general:
+- Use un entorno virtual (venv o conda) para aislar dependencias.
+- Si dispone de GPU NVIDIA y quiere aceleración, instale CUDA y los paquetes de PyTorch compatibles antes de instalar el resto de dependencias.
+
+1) Crear y activar un entorno virtual
+
 ```bash
+# desde la raíz del repositorio
 cd backend
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8000
+python -m venv .venv
+# macOS / Linux
+source .venv/bin/activate
+# Windows (PowerShell)
+.\.venv\Scripts\Activate.ps1
 ```
 
-En el panel del plugin, configura la URL del servidor: `http://localhost:8000`.
+2) Instalar PyTorch (GPU opcional)
+
+- Si necesita soporte GPU (Linux/Windows con NVIDIA), siga las instrucciones oficiales de PyTorch para instalar la rueda correcta compatible con su versión de CUDA: https://pytorch.org/get-started/locally/
+- Ejemplo (CPU-only):
+
+```bash
+# CPU-only (ejemplo):
+pip install "torch>=2.2.2" "torchvision>=0.17.2" --index-url https://download.pytorch.org/whl/cpu
+```
+
+Instalar PyTorch con la opción apropiada antes de instalar el resto de dependencias evita que pip elija una rueda no deseada.
+
+3) Instalar las demás dependencias del backend
+
+```bash
+pip install -r requirements.txt
+```
+
+Nota: `backend/requirements.txt` incluye una dependencia directa a MobileSAM (`mobile-sam @ https://github.com/ChaoningZhang/MobileSAM/...`) —pip descargará el paquete desde GitHub automáticamente.
+
+4) (Opcional) Usar un checkpoint local
+
+El wrapper de SAM (`backend/sam_wrapper.py`) usa `MODEL_PATH = None` por defecto, lo que permite que MobileSAM descargue automáticamente los pesos si es necesario. Si dispone de un checkpoint local prefiriera usarlo:
+
+- Cree una carpeta `backend/models/` y coloque allí el archivo de checkpoint.
+- Edite la constante `MODEL_PATH` en `backend/sam_wrapper.py` y ponga la ruta relativa, por ejemplo `models/mobilesam_checkpoint.pth`.
+
+5) Ejecutar el servidor
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Endpoints útiles:
+- Health: `http://localhost:8000/health`
+- Info: `http://localhost:8000/info`
+- API docs: `http://localhost:8000/docs`
+
+6) Prueba rápida del endpoint `/infer`
+
+Ejemplo con `curl` (envía una imagen PNG y recibe la máscara en base64):
+
+```bash
+curl -X POST "http://localhost:8000/infer" -F "image=@/ruta/a/tu/roi.png" -s | jq .
+```
+
+7) Dependencias en el entorno de QGIS
+
+Para que el plugin (`sam_client.py`) pueda enviar solicitudes HTTP al backend desde dentro de QGIS, el intérprete de Python que usa QGIS debe disponer del paquete `httpx`. En sistemas donde QGIS usa su propio entorno Python, instale `httpx` dentro del entorno de QGIS o asegúrese de que QGIS utilice un intérprete que tenga `httpx` instalado.
+
+Problemas comunes y notas de sistema
+- `rasterio` y otras dependencias geoespaciales requieren librerías nativas (GDAL). En macOS/Ubuntu use Homebrew/apt para instalar `gdal` antes de crear el entorno virtual si pip falla al compilar ruedas.
+- En macOS con chips Apple Silicon (M1/M2), use Python y ruedas compatibles; consulte la documentación de PyTorch y OpenCV para builds en ARM.
+- Si desea usar GPU, asegúrese de que los drivers NVIDIA y la versión de CUDA instalados en el sistema coincidan con la rueda de PyTorch que instale.
+
+En el panel del plugin, configure la URL del servidor: `http://localhost:8000`.
 
 > Si el servidor no está disponible, el plugin mantiene todas sus funcionalidades de visualización, importación y anotación manual sin degradar el flujo principal.
 
@@ -219,7 +287,7 @@ El pipeline se activa automáticamente en cada `push` y `pull_request` a las ram
 
 ## Equipo
 
-Proyecto de Titulación — Grupo 09  
+Proyecto de Titulación — Grupo 09
 Departamento de Ciencia de la Computación, Pontificia Universidad Católica de Chile
 
 Desarrollado para **CENIA** (Centro Nacional de Inteligencia Artificial) en colaboración con **EAA_UC** (Estudios Aplicados de Antropología UC).
@@ -227,11 +295,11 @@ Desarrollado para **CENIA** (Centro Nacional de Inteligencia Artificial) en cola
 **Product Owner:** Francisca Gil — francisca.gil@cenia.cl
 
 **Integrantes:**
-- Ana Villar 
+- Ana Villar
 - Fernanda Godoy
 - Amada Saez
 - Antonia Riffo
-- Javiera Larraín 
+- Javiera Larraín
 
 ---
 
@@ -241,7 +309,7 @@ Proyecto académico desarrollado con fines de investigación. Los datos arqueol�
 
 ---
 
-## Testing 
+## Testing
 
 ### Correr Tests Localmente
 
@@ -255,14 +323,14 @@ Si se quiere correr todos los test:
 pytest -v --cov=. --cov-report=term-missing
 ```
 
-Si se quiere correr solo los test de TIGS-35: 
+Si se quiere correr solo los test de TIGS-35:
 ```bash
 pytest tests/test_tigs35.py -v --cov=. --cov-report=term-missing
 ```
 
 ---
 
-## Wireframes del flujo de validación 
+## Wireframes del flujo de validación
 
 ### **Pantalla 1 — Imagen cargada**
 ![Imagen 1](data/wireframes/Imagen1.png)
