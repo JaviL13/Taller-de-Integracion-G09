@@ -10,3 +10,6 @@ annotations.gpkg
 
 # OS
 .DS_Store
+
+# Datos generados por el plugin
+annotations.gpkg
