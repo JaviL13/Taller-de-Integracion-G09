@@ -329,7 +329,9 @@ class AnnotationManager:
         if not feature.isValid():
             return ""
         notas = feature.attribute("notas")         # El campo puede ser NULL si nunca se guardaron notas
-        return notas if notas is not None else ""
+        if notas is None or not isinstance(notas, str):  # Puede ser None o QVariant que es un tipo especial
+            return ""                                    # de QGIS que a veces devuelve en vez de None
+        return notas
 
     # ── Estilo visual ──────────────────────────────────────────────────────
 
