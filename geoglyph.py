@@ -837,6 +837,15 @@ class GeoGlyph:
             f"Selección actual: {seleccionados} anotaciones"
         )
 
+        # Cargar notas del feature seleccionado en el campo de texto
+        if seleccionados == 1:
+            feature = self._annotation_manager.layer.selectedFeatures()[0]
+            notas = self._annotation_manager.leer_notas(feature.id())
+            self.panel.input_notas.setText(notas)
+        else:
+            # Si hay 0 o más de 1 seleccionados, limpiar el campo
+            self.panel.input_notas.clear()
+
     def _aprobar_seleccion(self):
         self._cambiar_estado_seleccion("approve")
 
@@ -860,6 +869,9 @@ class GeoGlyph:
         errores = []
         for feat in features:
             try:
+                # Guardar las notas del panel antes de cambiar el estado
+                notas_actuales = self.panel.input_notas.text()
+                self._annotation_manager.guardar_notas(feat.id(), notas_actuales)
                 if accion == "approve":
                     cambiado = self._annotation_manager.aprobar_anotacion(
                         feat.id())

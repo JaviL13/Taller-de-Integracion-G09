@@ -181,6 +181,8 @@ class AnnotationManager:
             QgsField("timestamp", QVariant.String),
             # Score de confianza (solo aplica para origin='ml'; humano = NULL).
             QgsField("score", QVariant.Double),
+            # Notas del arqueólogo asociadas a este polígono
+            QgsField("notas", QVariant.String),
         ])
         molde.updateFields()
 
@@ -303,9 +305,36 @@ class AnnotationManager:
         self.layer.triggerRepaint()
         return True
 
+    # TIGS 69: asociar las notas a los polígonos ------------------------------------------------
+
+    # Guarda las notas del arqueólogo en el atributo "notas" del feature. Retorna True si se guardó correctamente.
+    def guardar_notas(self, feature_id: int, notas: str) -> bool:
+        feature = self.layer.getFeature(feature_id)
+        if not feature.isValid():
+            return False
+
+        idx_notas = self.layer.fields().indexFromName("notas")
+        ok = self.layer.dataProvider().changeAttributeValues({
+            feature_id: {
+                idx_notas: notas,
+            }
+        })
+        if ok:
+            self.layer.triggerRepaint()
+        return ok
+
+    # Lee las notas guardadas de un feature. Retorna string vacío si no tiene.
+    def leer_notas(self, feature_id: int) -> str:
+        feature = self.layer.getFeature(feature_id)
+        if not feature.isValid():
+            return ""
+        notas = feature.attribute("notas")         # El campo puede ser NULL si nunca se guardaron notas
+        return notas if notas is not None else ""
+
     # ── Estilo visual ──────────────────────────────────────────────────────
 
     def aplicar_estilo_por_estado(self):
+
         """API pública para refrescar el estilo categorizado.
 
         Se puede llamar desde fuera (p.ej. desde el panel) para forzar un
