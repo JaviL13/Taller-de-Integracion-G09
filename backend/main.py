@@ -7,7 +7,7 @@ import sys
 # valida automáticamente los datos que llegan al endpoint
 from pydantic import BaseModel, field_validator
 # para generar el timestamp de la respuesta
-from datetime import datetime, timezone
+from datetime import datetime
 import time
 from typing import Optional
 import json
@@ -188,7 +188,6 @@ async def infer(
     mask_b64 = base64.b64encode(mask_bytes.getvalue()).decode('utf-8')
 
     # 5. Armar respuesta
-    processing_time_ms = round((time.time() - inicio) * 1000, 2)
 
     return {
         "status": "ok",
