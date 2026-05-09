@@ -169,7 +169,8 @@ class SamWorker(QThread):
             # 3. Ejecutar POST con httpx
             with httpx.Client(timeout=self.TIMEOUT_SECONDS) as client:
                 response = client.post(self.url, files=files, data=data)
-                elapsed = time.time() - start
+                # Tiempo medido para futuros logs de diagnóstico.
+                _ = time.time() - start
 
                 # 4. Validar respuesta
                 if response.status_code != 200:
