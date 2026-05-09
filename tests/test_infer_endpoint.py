@@ -19,7 +19,7 @@ import io
 import json
 import os
 import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -38,6 +38,10 @@ sys.path.insert(0, BACKEND_DIR)
 
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
+# sam_wrapper importa torch, que es muy pesado para instalar en CI. Si no
+# está disponible, saltar todo el módulo de tests (no se pueden ejecutar
+# sin tener el modelo SAM cargado de todas formas).
+pytest.importorskip("torch")
 from fastapi.testclient import TestClient  # noqa: E402
 
 # Mockear initialize_sam ANTES de importar app, para que no intente
