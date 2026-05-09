@@ -7,7 +7,7 @@ import sys
 # valida automáticamente los datos que llegan al endpoint
 from pydantic import BaseModel, field_validator
 # para generar el timestamp de la respuesta
-from datetime import datetime, timezone
+from datetime import datetime
 import time
 from typing import Optional
 import json
@@ -196,6 +196,7 @@ async def infer(
         "confidence": float(confidence),
         "width": width,
         "height": height,
+        "processing_time_ms": processing_time_ms,
     }
 
 

@@ -6,7 +6,6 @@ __pycache__/
 venv/
 backend/venv/
 .venv/
-annotations.gpkg
 
 # OS
 .DS_Store
