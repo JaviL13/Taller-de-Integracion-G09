@@ -6,7 +6,9 @@ __pycache__/
 venv/
 backend/venv/
 .venv/
-annotations.gpkg
 
 # OS
 .DS_Store
+
+# Datos generados por el plugin
+annotations.gpkg

@@ -1,3 +1,5 @@
+# el contenido dentro del archivo se ha ocupado IA para poder aplicar técnicas más
+# específicas y poder resolver errores de código que advertía la consola de qgis
 # -*- coding: utf-8 -*-
 """
 /***************************************************************************
@@ -70,6 +72,9 @@ class GeoGlyph:
         self._roi_tool = None  # TIGS-53: herramienta de ROI rectangular
         self._infer_worker = None  # TIGS-53: worker async aiohttp para /infer
         self._sam_worker = None  # TIGS-70: worker para ejecutar SAM real
+        # Guard para evitar recursión infinita cuando reescribimos el proyecto
+        # tras migrar el GPKG temporal a la carpeta del proyecto guardado.
+        self._suppress_save_handler = False
 
     def tr(self, message):
         return QCoreApplication.translate('GeoGlyph', message)
@@ -131,8 +136,20 @@ class GeoGlyph:
         # ── TIGS-64: botones aprobar / rechazar ──────────────────────────
         self.panel.btn_aprobar.clicked.connect(self._aprobar_seleccion)
         self.panel.btn_rechazar.clicked.connect(self._rechazar_seleccion)
-        # Inicializar el annotation manager al cargar el plugin
-        self._get_or_create_annotation_manager()  # Inicializar el anootation manageer al cargar el plugin
+
+        # NOTA: ya no se auto-inicializa el AnnotationManager al cargar el
+        # plugin. Antes se hacía acá y eso provocaba que las anotaciones
+        # vivieran en un GPKG fijo dentro de la carpeta del plugin, que se
+        # recargaba siempre (aunque el usuario cerrara sin guardar el
+        # proyecto). Ahora el manager se crea perezosamente cuando el
+        # usuario realmente lo necesita (dibuja un polígono o abre un
+        # proyecto que ya tenía anotaciones), apuntando por defecto a un
+        # archivo temporal del sistema.
+        from qgis.core import QgsProject
+        QgsProject.instance().projectSaved.connect(self._on_project_saved)
+        QgsProject.instance().cleared.connect(self._on_project_cleared)
+        QgsProject.instance().readProject.connect(self._on_project_read)
+
         # Agregar el panel a QGIS (lado derecho por defecto)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
 
@@ -141,6 +158,19 @@ class GeoGlyph:
         for action in self.actions:
             self.iface.removePluginRasterMenu(self.tr(u'&GeoGlyph'), action)
             self.iface.removeToolBarIcon(action)
+
+        # Desconectar señales del proyecto para no dejar callbacks colgando
+        # tras la descarga del plugin (causaría AttributeError al recargar).
+        from qgis.core import QgsProject
+        for signal, slot in (
+            (QgsProject.instance().projectSaved, self._on_project_saved),
+            (QgsProject.instance().cleared, self._on_project_cleared),
+            (QgsProject.instance().readProject, self._on_project_read),
+        ):
+            try:
+                signal.disconnect(slot)
+            except TypeError:
+                pass
 
         if self.panel is not None:
             self.iface.removeDockWidget(self.panel)
@@ -168,6 +198,14 @@ class GeoGlyph:
 
     # Boton para aplicar el realce seleccionado
     def apply_enhancement(self):
+        # Defensa: si el plugin fue recargado o el panel cerrado, la
+        # señal del botón puede entregar un click después de que
+        # self.panel quedó en None (ver unload). Sin este check
+        # crashea con AttributeError: 'NoneType' has no attribute
+        # 'combo_enhance'.
+        if self.panel is None:
+            return
+
         method = self.panel.combo_enhance.currentText()
 
         if method == "Color Ramp":
@@ -227,6 +265,24 @@ class GeoGlyph:
         if layer is None:
             self.iface.messageBar().pushMessage("Error", "No hay capa activa", level=2)
             return
+
+        # Si la capa activa no es raster (p.ej. la capa de anotaciones quedó
+        # arriba en el árbol), no podemos pedir bandStatistics — buscamos
+        # el primer raster del proyecto y lo usamos en su lugar.
+        if not isinstance(layer, QgsRasterLayer):
+            raster = next(
+                (cap for cap in QgsProject.instance().mapLayers().values()
+                 if isinstance(cap, QgsRasterLayer)),
+                None,
+            )
+            if raster is None:
+                self.iface.messageBar().pushMessage(
+                    "Error",
+                    "Selecciona una capa raster antes de aplicar Color Ramp",
+                    level=2,
+                )
+                return
+            layer = raster
 
         # Acceder a los datos del ráster
         provider = layer.dataProvider()
@@ -304,7 +360,11 @@ class GeoGlyph:
 
     def exportar_capa_realzada(self):
         # Herramientas para escribir ráster a disco
-        from qgis.core import QgsRasterFileWriter, QgsRasterPipe
+        from qgis.core import (
+            QgsRasterFileWriter,
+            QgsRasterPipe,
+            QgsProject,
+        )
         # Ventana de escritorio para guardar archivos
         from qgis.PyQt.QtWidgets import QFileDialog
 
@@ -368,13 +428,17 @@ class GeoGlyph:
         writer = QgsRasterFileWriter(file_path)
         writer.setOutputFormat("GTiff")              # Le da el formato
 
-        # Escribir el archivo conservando el CRS y extensión espacial original
+        # Escribir el archivo conservando el CRS y extensión espacial original.
+        # La firma nueva (QGIS 3.38+) requiere pasar también el
+        # QgsCoordinateTransformContext del proyecto; la firma vieja sin él
+        # quedó deprecada y será eliminada en versiones futuras.
         error = writer.writeRaster(
             pipe,
             provider.xSize(),                        # Ancho en píxeles
             provider.ySize(),                        # Alto en píxeles
             layer.extent(),                          # Área geográfica que cubre la imagen
-            layer.crs()                              # Sistema de coordenadas
+            layer.crs(),                             # Sistema de coordenadas
+            QgsProject.instance().transformContext()
         )
 
         # QgsRasterFileWriter.NoError es el código de éxito
@@ -470,24 +534,42 @@ class GeoGlyph:
     def _get_or_create_annotation_manager(self):
         """Lazy-init del AnnotationManager.
 
-        Se centraliza la creación acá para que dibujar y aprobar/rechazar
-        compartan la misma instancia. La primera vez que se llama, además
-        engancha la señal selectionChanged de la capa para refrescar el
-        estado de los botones aprobar/rechazar (TIGS-64).
+        Estrategia de persistencia:
+        - Si el proyecto QGIS ya tiene una capa 'annotations' cargada
+          (por ejemplo, abierta desde un .qgs guardado), reutilizamos
+          su archivo .gpkg.
+        - Si no, creamos un .gpkg en un archivo temporal único de la
+          sesión. Esto hace que las anotaciones sean efímeras hasta
+          que el usuario guarde el proyecto QGIS — al guardar, el
+          handler `_on_project_saved` migra el GPKG temporal a la
+          carpeta del proyecto y reapunta la capa allí.
+
+        Si el manager existe pero la capa fue eliminada, resetear.
         """
-        # Si el manager existe pero la capa fue eliminada, resetear
         if self._annotation_manager is not None:
             try:
-                # Intentar acceder a la capa — si fue eliminada lanza RuntimeError
                 _ = self._annotation_manager.layer.id()
             except RuntimeError:
                 self._annotation_manager = None
+
         if self._annotation_manager is None:
             canvas = self.iface.mapCanvas()
             crs = canvas.mapSettings().destinationCrs()
-            gpkg_path = os.path.join(
-                os.path.dirname(__file__), "annotations.gpkg"
-            )
+
+            # 1) ¿El proyecto cargado ya tiene un .gpkg de anotaciones?
+            gpkg_path = self._buscar_gpkg_en_proyecto()
+
+            # 2) Si no, usamos un temporal único de la sesión.
+            if gpkg_path is None:
+                import tempfile
+                fd, gpkg_path = tempfile.mkstemp(
+                    suffix=".gpkg", prefix="geoglyph_annotations_"
+                )
+                os.close(fd)
+                # mkstemp crea el archivo vacío; lo borramos para que el
+                # AnnotationManager lo cree con el esquema correcto.
+                os.remove(gpkg_path)
+
             self._annotation_manager = AnnotationManager(gpkg_path, crs)
 
             # TIGS-64: cuando cambia la selección sobre la capa annotations,
@@ -499,6 +581,94 @@ class GeoGlyph:
             self._on_seleccion_cambiada()
 
         return self._annotation_manager
+
+    def _buscar_gpkg_en_proyecto(self):
+        """Si el proyecto ya tiene una capa 'annotations' OGR, devuelve
+        la ruta a su GPKG. Si no, devuelve None.
+
+        Esto permite reutilizar la capa que QGIS levantó automáticamente
+        al abrir un .qgs guardado, sin crear un temporal nuevo.
+        """
+        from qgis.core import QgsProject
+        for layer in QgsProject.instance().mapLayers().values():
+            if layer.name() == "annotations" and layer.providerType() == "ogr":
+                source = layer.source()
+                # source típico: "/ruta/al/file.gpkg|layername=annotations"
+                if "|" in source:
+                    source = source.split("|", 1)[0]
+                if os.path.exists(source):
+                    return source
+        return None
+
+    def _on_project_saved(self):
+        """Tras guardar el proyecto, migra el GPKG temporal (si lo es) a
+        la carpeta del proyecto y reapunta la capa.
+
+        Así el .qgs guardado queda autocontenido: las anotaciones viven
+        en `{carpeta_del_proyecto}/annotations.gpkg` en vez de en /tmp.
+        """
+        if self._suppress_save_handler:
+            return
+        if self._annotation_manager is None:
+            return
+
+        from qgis.core import QgsProject
+        project = QgsProject.instance()
+        project_path = project.fileName()
+        if not project_path:
+            return
+
+        project_dir = os.path.dirname(project_path)
+        current_gpkg = self._annotation_manager.gpkg_path
+        target_gpkg = os.path.join(project_dir, "annotations.gpkg")
+
+        if os.path.abspath(current_gpkg) == os.path.abspath(target_gpkg):
+            return  # ya está en la carpeta del proyecto
+
+        import shutil
+        try:
+            shutil.copy2(current_gpkg, target_gpkg)
+        except Exception as e:
+            self.iface.messageBar().pushMessage(
+                "Aviso",
+                f"No se pudo guardar las anotaciones junto al proyecto: {e}",
+                level=2,
+            )
+            return
+
+        # Reapuntar la capa al GPKG nuevo (en la carpeta del proyecto).
+        layer = self._annotation_manager.layer
+        layer.setDataSource(
+            f"{target_gpkg}|layername=annotations",
+            layer.name(),
+            "ogr",
+        )
+        self._annotation_manager.gpkg_path = target_gpkg
+
+        # Reescribir el .qgs para que persista la nueva ruta de la capa.
+        # Guard para evitar que el propio re-save dispare otra vez este
+        # handler en bucle infinito.
+        self._suppress_save_handler = True
+        try:
+            project.write()
+        finally:
+            self._suppress_save_handler = False
+
+    def _on_project_cleared(self):
+        """Al cerrar/cambiar de proyecto, soltar la referencia al manager
+        para que el próximo proyecto/sesión empiece desde cero (con un
+        .gpkg temporal nuevo)."""
+        self._annotation_manager = None
+
+    def _on_project_read(self, *_args):
+        """Cuando se termina de cargar un proyecto, si trae una capa de
+        anotaciones, inicializar el manager apuntando a ese GPKG.
+
+        Sin esto, los botones aprobar/rechazar no se enganchan a la
+        señal selectionChanged hasta que el usuario dibuje algo.
+        """
+        if self._buscar_gpkg_en_proyecto() is not None:
+            self._get_or_create_annotation_manager()
 
     def _activar_herramienta_dibujo(self):
         # Activa la herramienta de dibujo de polígonos en el canvas
@@ -608,7 +778,9 @@ class GeoGlyph:
         # o la capa no es válida, el helper levanta ValueError → se avisa
         # al usuario y se aborta.
         try:
-            crop_info = extract_raster_crop(layer, rect)
+            # El valor de retorno no se usa: solo nos importa el efecto
+            # secundario (que lance ValueError si la ROI cae fuera del raster).
+            extract_raster_crop(layer, rect)
         except ValueError as e:
             self.iface.messageBar().pushMessage(
                 "GeoGlyph", str(e), level=1, duration=4
@@ -857,6 +1029,15 @@ class GeoGlyph:
             f"Selección actual: {seleccionados} anotaciones"
         )
 
+        # Cargar notas del feature seleccionado en el campo de texto
+        if seleccionados == 1:
+            feature = self._annotation_manager.layer.selectedFeatures()[0]
+            notas = self._annotation_manager.leer_notas(feature.id())
+            self.panel.input_notas.setText(notas)
+        else:
+            # Si hay 0 o más de 1 seleccionados, limpiar el campo
+            self.panel.input_notas.clear()
+
     def _aprobar_seleccion(self):
         self._cambiar_estado_seleccion("approve")
 
@@ -880,6 +1061,9 @@ class GeoGlyph:
         errores = []
         for feat in features:
             try:
+                # Guardar las notas del panel antes de cambiar el estado
+                notas_actuales = self.panel.input_notas.text()
+                self._annotation_manager.guardar_notas(feat.id(), notas_actuales)
                 if accion == "approve":
                     cambiado = self._annotation_manager.aprobar_anotacion(
                         feat.id())

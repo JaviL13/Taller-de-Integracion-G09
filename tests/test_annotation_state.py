@@ -1,3 +1,5 @@
+# el contenido dentro del archivo se ha ocupado IA para poder crear tests más
+# robustos y claros y poder testear escenarios difíciles
 # -*- coding: utf-8 -*-
 """Tests del módulo annotation_state (TIGS-64).
 
