@@ -1,3 +1,5 @@
+# el contenido dentro del archivo se ha ocupado IA para poder aplicar técnicas más
+# específicas y poder resolver errores de código que advertía la consola de qgis
 # para activar entorno virtual ejecutar dentro de backend
 # python -m venv venv
 # venv\Scripts\activate
