@@ -30,7 +30,8 @@ from qgis.PyQt import QtWidgets
 
 from qgis.core import QgsRasterLayer, QgsProject
 
-# This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
+# This loads your .ui file so that PyQt can populate your plugin with the
+# elements from Qt Designer
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
     os.path.dirname(__file__), 'geoglyph_dialog_base.ui'))
 
@@ -51,7 +52,7 @@ class GeoGlyphDialog(QtWidgets.QDialog, FORM_CLASS):
             from qgis.PyQt.QtWidgets import QVBoxLayout
             layout = QVBoxLayout()
             self.setLayout(layout)
-        
+
         # Crear el botón "Abrir GeoTIFF"
         self.btn_open_tiff = QtWidgets.QPushButton("Abrir GeoTIFF", self)
         self.btn_open_tiff.clicked.connect(self.open_geotiff)
@@ -87,6 +88,13 @@ class GeoGlyphDialog(QtWidgets.QDialog, FORM_CLASS):
 
         # Agregar la capa al proyecto de QGIS
         QgsProject.instance().addMapLayer(layer)
+
+        # Dejarla activa y visible en el canvas para que el usuario la vea
+        # inmediatamente después de cargarla.
+        self.iface.setActiveLayer(layer)
+        canvas = self.iface.mapCanvas()
+        canvas.setExtent(layer.extent())
+        canvas.refresh()
 
         QtWidgets.QMessageBox.information(
             self,

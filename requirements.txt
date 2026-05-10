@@ -5,3 +5,5 @@ pytest-cov
 pre-commit
 rasterio
 numpy
+fastapi
+httpx

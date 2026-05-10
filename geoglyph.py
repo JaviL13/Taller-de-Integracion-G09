@@ -1,3 +1,5 @@
+# el contenido dentro del archivo se ha ocupado IA para poder aplicar técnicas más
+# específicas y poder resolver errores de código que advertía la consola de qgis
 # -*- coding: utf-8 -*-
 """
 /***************************************************************************
@@ -25,13 +27,25 @@
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
+from qgis.core import QgsRasterLayer
+from qgis.core import QgsGeometry, QgsPointXY
 
-from .resources import *
+from .resources import *  # noqa: F403, F401
 from .geoglyph_dialog import GeoGlyphDialog
-from .geoglyph_panel import GeoGlyphPanel
+from .geoglyph_panel import GeoGlyphPanel  # Se importa el panel con los botones
 from .http_worker import EnhanceWorker  # ← nuevo en TIGS-42
 from .decorrelation_dialog import DecorrelationStretchDialog
+from .annotation_tool import PolygonDrawTool  # Se importa para crear los dibujos
+from .annotation_manager import AnnotationManager
+from .roi_select_tool import RectangularROITool  # TIGS-53
+from .infer_worker import InferWorker  # TIGS-53
+from .sam_client import SamWorker  # TIGS-70: worker para ejecutar SAM real
+from .raster_crop import extract_raster_crop, extract_raster_pixels  # TIGS-53, TIGS-70
+from .annotation_state import StateTransitionError  # ← TIGS-64
+
+
 import os.path
+import numpy as np
 
 
 class GeoGlyph:
@@ -53,6 +67,14 @@ class GeoGlyph:
         self.menu = self.tr(u'&GeoGlyph')
         self.panel = None
         self._worker = None  # referencia al worker activo (evita GC prematuro)
+        self._draw_tool = None  # Para la funcionalidad de dibujo
+        self._annotation_manager = None  # Para la funcionalidad de dibujo
+        self._roi_tool = None  # TIGS-53: herramienta de ROI rectangular
+        self._infer_worker = None  # TIGS-53: worker async aiohttp para /infer
+        self._sam_worker = None  # TIGS-70: worker para ejecutar SAM real
+        # Guard para evitar recursión infinita cuando reescribimos el proyecto
+        # tras migrar el GPKG temporal a la carpeta del proyecto guardado.
+        self._suppress_save_handler = False
 
     def tr(self, message):
         return QCoreApplication.translate('GeoGlyph', message)
@@ -80,7 +102,7 @@ class GeoGlyph:
         return action
 
     def initGui(self):
-        """Crea entradas de menú, toolbar y panel lateral."""
+        # Crea entradas de menú, toolbar y panel lateral.
         icon_path = ':/plugins/geoglyph/icon.png'
         self.add_action(
             icon_path,
@@ -88,19 +110,45 @@ class GeoGlyph:
             callback=self.run,
             parent=self.iface.mainWindow()
         )
-
+        # Crear y registrar el panel lateral
         self.panel = GeoGlyphPanel(self.iface, self.iface.mainWindow())
 
         # Conexiones de botones
         self.panel.btn_abrir_tiff.clicked.connect(self.abrir_geotiff)
         self.panel.btn_exportar.clicked.connect(self.exportar_capa_realzada)
-        self.panel.btn_inferencia.clicked.connect(self._ejecutar_inferencia)  # ← nuevo
+        self.panel.btn_inferencia.clicked.connect(
+            self._ejecutar_inferencia)  # ← nuevo
+        self.panel.btn_infer.clicked.connect(self._ejecutar_infer)  # boton de renderizar
 
         # Conectar el boton "Aplicar Realce" del panel
         self.panel.btn_apply.clicked.connect(self.apply_enhancement)
 
-        #Modificar número de bandas según capa seleccionada
-        self.iface.layerTreeView().selectionModel().selectionChanged.connect(self.cargar_bandas)
+        # Modificar número de bandas según capa seleccionada
+        self.iface.layerTreeView().selectionModel(
+        ).selectionChanged.connect(self.cargar_bandas)
+
+        # Botón para dibujar
+        self.panel.btn_dibujar.clicked.connect(
+            self._activar_herramienta_dibujo)
+
+        # TIGS-53: botón para seleccionar un ROI rectangular y enviarlo al backend
+        self.panel.btn_roi.clicked.connect(self._activar_herramienta_roi)
+        # ── TIGS-64: botones aprobar / rechazar ──────────────────────────
+        self.panel.btn_aprobar.clicked.connect(self._aprobar_seleccion)
+        self.panel.btn_rechazar.clicked.connect(self._rechazar_seleccion)
+
+        # NOTA: ya no se auto-inicializa el AnnotationManager al cargar el
+        # plugin. Antes se hacía acá y eso provocaba que las anotaciones
+        # vivieran en un GPKG fijo dentro de la carpeta del plugin, que se
+        # recargaba siempre (aunque el usuario cerrara sin guardar el
+        # proyecto). Ahora el manager se crea perezosamente cuando el
+        # usuario realmente lo necesita (dibuja un polígono o abre un
+        # proyecto que ya tenía anotaciones), apuntando por defecto a un
+        # archivo temporal del sistema.
+        from qgis.core import QgsProject
+        QgsProject.instance().projectSaved.connect(self._on_project_saved)
+        QgsProject.instance().cleared.connect(self._on_project_cleared)
+        QgsProject.instance().readProject.connect(self._on_project_read)
 
         # Agregar el panel a QGIS (lado derecho por defecto)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
@@ -111,6 +159,19 @@ class GeoGlyph:
             self.iface.removePluginRasterMenu(self.tr(u'&GeoGlyph'), action)
             self.iface.removeToolBarIcon(action)
 
+        # Desconectar señales del proyecto para no dejar callbacks colgando
+        # tras la descarga del plugin (causaría AttributeError al recargar).
+        from qgis.core import QgsProject
+        for signal, slot in (
+            (QgsProject.instance().projectSaved, self._on_project_saved),
+            (QgsProject.instance().cleared, self._on_project_cleared),
+            (QgsProject.instance().readProject, self._on_project_read),
+        ):
+            try:
+                signal.disconnect(slot)
+            except TypeError:
+                pass
+
         if self.panel is not None:
             self.iface.removeDockWidget(self.panel)
             self.panel = None
@@ -120,13 +181,31 @@ class GeoGlyph:
             self._worker.quit()
             self._worker.wait()
 
+        # TIGS-53: idem para el worker de /infer.
+        if self._infer_worker is not None and self._infer_worker.isRunning():
+            self._infer_worker.quit()
+            self._infer_worker.wait()
+
+        # TIGS-70: idem para el worker de SAM.
+        if self._sam_worker is not None and self._sam_worker.isRunning():
+            self._sam_worker.quit()
+            self._sam_worker.wait()
+
     def abrir_geotiff(self):
-        """Abre el diálogo para cargar un GeoTIFF."""
+        # Abre el diálogo para cargar un GeoTIFF
         dlg = GeoGlyphDialog(self.iface)
         dlg.exec_()
 
     # Boton para aplicar el realce seleccionado
     def apply_enhancement(self):
+        # Defensa: si el plugin fue recargado o el panel cerrado, la
+        # señal del botón puede entregar un click después de que
+        # self.panel quedó en None (ver unload). Sin este check
+        # crashea con AttributeError: 'NoneType' has no attribute
+        # 'combo_enhance'.
+        if self.panel is None:
+            return
+
         method = self.panel.combo_enhance.currentText()
 
         if method == "Color Ramp":
@@ -135,22 +214,27 @@ class GeoGlyph:
         elif method == "Decorrelation Stretch":
             self.abrir_decorrelation_stretch()
 
-    def cargar_bandas(self): #Número de bandas que tiene una capa
-        layers = self.iface.layerTreeView().selectedLayers() #capa seleccionada
+    def cargar_bandas(self):  # Número de bandas que tiene una capa
+        layers = self.iface.layerTreeView().selectedLayers()  # capa seleccionada
 
         if not layers:
             return
 
         layer = layers[0]
+
+        # Solo procesar capas raster, ignorar vectoriales
+
+        if not isinstance(layer, QgsRasterLayer):
+            return
         provider = layer.dataProvider()
 
-        #Obtener número de bandas
+        # Obtener número de bandas
         band_count = provider.bandCount()
 
         # Guardar banda actual (si existe)
         current_band = self.panel.combo_band.currentText()
 
-        #Modificar botón lateral
+        # Modificar botón lateral
         self.panel.combo_band.clear()
 
         for i in range(1, band_count + 1):
@@ -163,29 +247,47 @@ class GeoGlyph:
                 self.panel.combo_band.setCurrentIndex(index)
 
     def apply_color_ramp(self):
-        from qgis.core import(
-            QgsRasterShader, #aplica los colores
-            QgsColorRampShader, #define los colores
-            QgsSingleBandPseudoColorRenderer, #muestra los resultados
-            QgsProject, #agrega la capa al mapa
+        from qgis.core import (
+            QgsRasterShader,  # aplica los colores
+            QgsColorRampShader,  # define los colores
+            QgsSingleBandPseudoColorRenderer,  # muestra los resultados
+            QgsProject,  # agrega la capa al mapa
         )
-        from PyQt5.QtGui import QColor #define colores
+        from PyQt5.QtGui import QColor  # define colores
 
-        #Obtener tipo de esquema de color
+        # Obtener tipo de esquema de color
         ramp_type = self.panel.combo_color_ramp.currentText()
-        
-        #Obtener la capa seleccionada en QGIS
+
+        # Obtener la capa seleccionada en QGIS
         layer = self.iface.activeLayer()
 
-        #Evita error si el usuario no seleccionó nada
+        # Evita error si el usuario no seleccionó nada
         if layer is None:
             self.iface.messageBar().pushMessage("Error", "No hay capa activa", level=2)
             return
 
-        #Acceder a los datos del ráster
+        # Si la capa activa no es raster (p.ej. la capa de anotaciones quedó
+        # arriba en el árbol), no podemos pedir bandStatistics — buscamos
+        # el primer raster del proyecto y lo usamos en su lugar.
+        if not isinstance(layer, QgsRasterLayer):
+            raster = next(
+                (cap for cap in QgsProject.instance().mapLayers().values()
+                 if isinstance(cap, QgsRasterLayer)),
+                None,
+            )
+            if raster is None:
+                self.iface.messageBar().pushMessage(
+                    "Error",
+                    "Selecciona una capa raster antes de aplicar Color Ramp",
+                    level=2,
+                )
+                return
+            layer = raster
+
+        # Acceder a los datos del ráster
         provider = layer.dataProvider()
 
-        #Banda seleccionada por usuario
+        # Banda seleccionada por usuario
         band = int(self.panel.combo_band.currentText())
 
         # Obtener min/max
@@ -197,12 +299,12 @@ class GeoGlyph:
         min_val = float(min_text) if min_text else stats.minimumValue
         max_val = float(max_text) if max_text else stats.maximumValue
 
-        #Validar que min<max
+        # Validar que min<max
         if min_val >= max_val:
             self.iface.messageBar().pushMessage(
                 "Error",
                 "Min debe ser menor que Max",
-                level=2, #mensaje de error
+                level=2,  # mensaje de error
                 duration=3
             )
             return
@@ -211,29 +313,41 @@ class GeoGlyph:
         color_ramp = QgsColorRampShader()
         color_ramp.setColorRampType(QgsColorRampShader.Interpolated)
 
-        #Definir cómo mapear los valores (colores) según esquema escogido por usuario
-        #viridis (paleta secuencial, de oscuro a claro)
+        # Definir cómo mapear los valores (colores) según esquema escogido por usuario
+        # viridis (paleta secuencial, de oscuro a claro)
         if ramp_type == "viridis":
             items = [
-                QgsColorRampShader.ColorRampItem(min_val, QColor(68, 1, 84)), #valores bajos oscuros (morado oscuro)
-                QgsColorRampShader.ColorRampItem((min_val + max_val) / 2, QColor(32, 144, 140)), #valores medios un poco más claros (verde/azul)
-                QgsColorRampShader.ColorRampItem(max_val, QColor(253, 231, 37)), #valores altos claros (amarillo)
+                # valores bajos oscuros (morado oscuro)
+                QgsColorRampShader.ColorRampItem(min_val, QColor(68, 1, 84)),
+                # valores medios un poco más claros (verde/azul)
+                QgsColorRampShader.ColorRampItem(
+                    (min_val + max_val) / 2, QColor(32, 144, 140)),
+                QgsColorRampShader.ColorRampItem(max_val, QColor(
+                    253, 231, 37)),  # valores altos claros (amarillo)
             ]
-        #RdYlGn (esquema divergente tipo semáforo (rojo-> amarillo -> verde))
+        # RdYlGn (esquema divergente tipo semáforo (rojo-> amarillo -> verde))
         elif ramp_type == "RdYlGn":
             items = [
-                QgsColorRampShader.ColorRampItem(min_val, QColor(165, 0, 38)), #valores bajos o críticos rojo
-                QgsColorRampShader.ColorRampItem((min_val + max_val) / 2, QColor(255, 255, 191)), #valores medios amarillo
-                QgsColorRampShader.ColorRampItem(max_val, QColor(0, 104, 55)), #valores altos o favorables verde
+                QgsColorRampShader.ColorRampItem(min_val, QColor(
+                    165, 0, 38)),  # valores bajos o críticos rojo
+                QgsColorRampShader.ColorRampItem(
+                    (min_val + max_val) / 2,
+                    QColor(
+                        255,
+                        255,
+                        191)),
+                # valores medios amarillo
+                QgsColorRampShader.ColorRampItem(max_val, QColor(
+                    0, 104, 55)),  # valores altos o favorables verde
             ]
 
         color_ramp.setColorRampItemList(items)
 
-        #Aplicar la lógica del color ramp
+        # Aplicar la lógica del color ramp
         shader = QgsRasterShader()
         shader.setRasterShaderFunction(color_ramp)
 
-        #Mostrar la banda seleccionada con estos colores
+        # Mostrar la banda seleccionada con estos colores
         renderer = QgsSingleBandPseudoColorRenderer(provider, band, shader)
 
         # Crear nueva capa para no modificar original
@@ -241,25 +355,49 @@ class GeoGlyph:
         new_layer.setRenderer(renderer)
         new_layer.setName(f"{layer.name()}_{ramp_type}")
 
-        #Mostrar en QGIS, en el panel de capas
+        # Mostrar en QGIS, en el panel de capas
         QgsProject.instance().addMapLayer(new_layer)
 
     def exportar_capa_realzada(self):
-        from qgis.core import QgsRasterFileWriter, QgsRasterPipe      # Herramientas para escribir ráster a disco
-        from qgis.PyQt.QtWidgets import QFileDialog                   # Ventana de escritorio para guardar archivos
+        # Herramientas para escribir ráster a disco
+        from qgis.core import (
+            QgsRasterFileWriter,
+            QgsRasterPipe,
+            QgsProject,
+        )
+        # Ventana de escritorio para guardar archivos
+        from qgis.PyQt.QtWidgets import QFileDialog
 
-        layer = self.iface.activeLayer()                              # Obtener la capa activa en QGIS
+        # Obtener la capa activa en QGIS
+        layer = self.iface.activeLayer()
 
         # Si no hay capa activa, mostrar error y salir
         if layer is None:
-            self.iface.messageBar().pushMessage("Error", "No hay capa activa para exportar", level=2)
+            self.iface.messageBar().pushMessage(
+                "Error", "No hay capa activa para exportar", level=2)
             return
 
-        # Abrir ventana de "documentos" para que el usuario elija dónde quiere guardar el archivo
+        # Validar que la capa activa sea raster. Si el usuario dibujó
+        # anotaciones, la capa activa puede ser la vectorial 'annotations'
+        # y QgsVectorDataProvider no tiene .clone(), así que provider.clone()
+        # más abajo crashearía. Mejor avisar con un mensaje claro.
+        if not isinstance(layer, QgsRasterLayer):
+            self.iface.messageBar().pushMessage(
+                "Error",
+                "La capa activa no es raster. Selecciona la capa realzada "
+                "en el panel de capas antes de exportar.",
+                level=2,
+                duration=4,
+            )
+            return
+
+        # Abrir ventana de "documentos" para que el usuario elija dónde quiere
+        # guardar el archivo
         file_path, _ = QFileDialog.getSaveFileName(
             None,
             "Guardar capa realzada como GeoTIFF",
-            "",                                                       # El archivo no tine nombre predeterminado
+            # El archivo no tine nombre predeterminado
+            "",
             "GeoTIFF (*.tif *.tiff)"
         )
 
@@ -270,55 +408,77 @@ class GeoGlyph:
         # Proveedor es el que tiene acceso a los  datos reales de la capa
         provider = layer.dataProvider()
 
-        # El pipe es por donde pasan esos datos desde el proveedor hasta el archivo que se va a guardar
+        # El pipe es por donde pasan esos datos desde el proveedor hasta el
+        # archivo que se va a guardar
         pipe = QgsRasterPipe()
 
         # Cargar el proveedor en el pipe, si falla mostrar error
         if not pipe.set(provider.clone()):
-            self.iface.messageBar().pushMessage("Error", "No se pudo preparar la capa para exportar", level=2)
+            self.iface.messageBar().pushMessage(
+                "Error", "No se pudo preparar la capa para exportar", level=2)
             return
 
-        # Insertar el renderer en el pipe para que el GeoTIFF exportado tenga los colores del realce aplicado
+        # Insertar el renderer en el pipe para que el GeoTIFF exportado tenga
+        # los colores del realce aplicado
         renderer = layer.renderer()
         if renderer:
             pipe.set(renderer.clone())
 
-        writer = QgsRasterFileWriter(file_path)      # Escribe los datos al archivo en disco
+        # Escribe los datos al archivo en disco
+        writer = QgsRasterFileWriter(file_path)
         writer.setOutputFormat("GTiff")              # Le da el formato
 
-        # Escribir el archivo conservando el CRS y extensión espacial original      
+        # Escribir el archivo conservando el CRS y extensión espacial original.
+        # La firma nueva (QGIS 3.38+) requiere pasar también el
+        # QgsCoordinateTransformContext del proyecto; la firma vieja sin él
+        # quedó deprecada y será eliminada en versiones futuras.
         error = writer.writeRaster(
             pipe,
             provider.xSize(),                        # Ancho en píxeles
             provider.ySize(),                        # Alto en píxeles
             layer.extent(),                          # Área geográfica que cubre la imagen
-            layer.crs()                              # Sistema de coordenadas
+            layer.crs(),                             # Sistema de coordenadas
+            QgsProject.instance().transformContext()
         )
 
         # QgsRasterFileWriter.NoError es el código de éxito
         if error == QgsRasterFileWriter.NoError:
-            self.iface.messageBar().pushMessage("Éxito", f"Capa exportada correctamente: {file_path}", level=0)
+            self.iface.messageBar().pushMessage(
+                "Éxito", f"Capa exportada correctamente: {file_path}", level=0)
         else:
-            self.iface.messageBar().pushMessage("Error", "No se pudo exportar la capa", level=2)
+            self.iface.messageBar().pushMessage(
+                "Error", "No se pudo exportar la capa", level=2)
+
     def abrir_decorrelation_stretch(self):
         """Abre el diálogo para aplicar decorrelation stretch (PCA sobre 3 bandas)."""
-        dlg = DecorrelationStretchDialog(self.iface, parent=self.iface.mainWindow())
+        dlg = DecorrelationStretchDialog(
+            self.iface, parent=self.iface.mainWindow())
         dlg.exec_()
 
     def run(self):
-        """Muestra/oculta el panel lateral."""
+        # Muestra u oculta el panel lateral.
         if self.panel is not None:
             self.panel.setVisible(not self.panel.isVisible())
 
-    # ── TIGS-42: Comunicación HTTP asíncrona ──────────────────────────────────
+    # ── TIGS-42: Comunicación HTTP asíncrona ────────────────────────────────
 
     def _ejecutar_inferencia(self):
         """
         Lanza EnhanceWorker en un QThread para llamar POST /enhance
         sin bloquear el hilo principal de QGIS.
         """
-        # Evitar doble-click mientras hay una llamada en curso
+        # Evitar doble-click mientras hay una llamada en curso (tanto para /enhance como para SAM)
         if self._worker is not None and self._worker.isRunning():
+            return
+
+        # No permitir /enhance si hay una inferencia SAM en curso
+        if self._sam_worker is not None and self._sam_worker.isRunning():
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                "Ya hay una inferencia SAM en curso. Espera a que termine antes de ejecutar otra.",
+                level=1,
+                duration=3,
+            )
             return
 
         self.panel.btn_inferencia.setEnabled(False)
@@ -327,7 +487,8 @@ class GeoGlyph:
             "color: orange; font-size: 10px; margin-left: 4px;"
         )
 
-        # bbox placeholder — en iteraciones futuras vendrá del ROI seleccionado en QGIS
+        # bbox placeholder — en iteraciones futuras vendrá del ROI seleccionado
+        # en QGIS
         self._worker = EnhanceWorker(bbox=[0, 0, 256, 256], band=1)
         self._worker.finished.connect(self._on_inferencia_ok)
         self._worker.error.connect(self._on_inferencia_error)
@@ -342,7 +503,25 @@ class GeoGlyph:
         self.panel.lbl_status.setStyleSheet(
             "color: green; font-size: 10px; margin-left: 4px;"
         )
-        self.panel.btn_inferencia.setEnabled(True)
+        self.panel.btn_inferencia.setEnabled(False)
+
+        # TIGS 57 - Lógica para devolver el score de confianza ─────────────────────────────
+        detecciones = body.get("detections", [])  # Esta es la lista de detecciones del backend
+        if detecciones:
+            confianza = detecciones[0].get("confidence", None)
+            if confianza is not None:
+                self.panel.lbl_confianza.setText(f"Confianza: {confianza * 100:.0f}%")  # Confianza de decimal a %
+                self.panel.lbl_confianza.setStyleSheet(
+                    "color: green; font-size: 10px; margin-left: 4px;"  # Verde si es >= 70%, negro si es menor
+                    if confianza >= 0.7
+                    else "color: black; font-size: 10px; margin-left: 4px;"
+                )
+        else:
+            # Si no hay detecciones, resetear el label
+            self.panel.lbl_confianza.setText("Confianza: sin detecciones")
+            self.panel.lbl_confianza.setStyleSheet(
+                "color: gray; font-size: 10px; margin-left: 4px;"
+            )
 
     def _on_inferencia_error(self, msg):
         """Callback ejecutado en el hilo principal cuando el worker falla."""
@@ -350,4 +529,597 @@ class GeoGlyph:
         self.panel.lbl_status.setStyleSheet(
             "color: red; font-size: 10px; margin-left: 4px;"
         )
-        self.panel.btn_inferencia.setEnabled(True)
+        self.panel.btn_inferencia.setEnabled(False)
+
+    def _get_or_create_annotation_manager(self):
+        """Lazy-init del AnnotationManager.
+
+        Estrategia de persistencia:
+        - Si el proyecto QGIS ya tiene una capa 'annotations' cargada
+          (por ejemplo, abierta desde un .qgs guardado), reutilizamos
+          su archivo .gpkg.
+        - Si no, creamos un .gpkg en un archivo temporal único de la
+          sesión. Esto hace que las anotaciones sean efímeras hasta
+          que el usuario guarde el proyecto QGIS — al guardar, el
+          handler `_on_project_saved` migra el GPKG temporal a la
+          carpeta del proyecto y reapunta la capa allí.
+
+        Si el manager existe pero la capa fue eliminada, resetear.
+        """
+        if self._annotation_manager is not None:
+            try:
+                _ = self._annotation_manager.layer.id()
+            except RuntimeError:
+                self._annotation_manager = None
+
+        if self._annotation_manager is None:
+            canvas = self.iface.mapCanvas()
+            crs = canvas.mapSettings().destinationCrs()
+
+            # 1) ¿El proyecto cargado ya tiene un .gpkg de anotaciones?
+            gpkg_path = self._buscar_gpkg_en_proyecto()
+
+            # 2) Si no, usamos un temporal único de la sesión.
+            if gpkg_path is None:
+                import tempfile
+                fd, gpkg_path = tempfile.mkstemp(
+                    suffix=".gpkg", prefix="geoglyph_annotations_"
+                )
+                os.close(fd)
+                # mkstemp crea el archivo vacío; lo borramos para que el
+                # AnnotationManager lo cree con el esquema correcto.
+                os.remove(gpkg_path)
+
+            self._annotation_manager = AnnotationManager(gpkg_path, crs)
+
+            # TIGS-64: cuando cambia la selección sobre la capa annotations,
+            # habilitamos/deshabilitamos los botones aprobar/rechazar.
+            self._annotation_manager.layer.selectionChanged.connect(
+                self._on_seleccion_cambiada
+            )
+            # Estado inicial coherente (0 features seleccionados).
+            self._on_seleccion_cambiada()
+
+        return self._annotation_manager
+
+    def _buscar_gpkg_en_proyecto(self):
+        """Si el proyecto ya tiene una capa 'annotations' OGR, devuelve
+        la ruta a su GPKG. Si no, devuelve None.
+
+        Esto permite reutilizar la capa que QGIS levantó automáticamente
+        al abrir un .qgs guardado, sin crear un temporal nuevo.
+        """
+        from qgis.core import QgsProject
+        for layer in QgsProject.instance().mapLayers().values():
+            if layer.name() == "annotations" and layer.providerType() == "ogr":
+                source = layer.source()
+                # source típico: "/ruta/al/file.gpkg|layername=annotations"
+                if "|" in source:
+                    source = source.split("|", 1)[0]
+                if os.path.exists(source):
+                    return source
+        return None
+
+    def _on_project_saved(self):
+        """Tras guardar el proyecto, migra el GPKG temporal (si lo es) a
+        la carpeta del proyecto y reapunta la capa.
+
+        Así el .qgs guardado queda autocontenido: las anotaciones viven
+        en `{carpeta_del_proyecto}/annotations.gpkg` en vez de en /tmp.
+        """
+        if self._suppress_save_handler:
+            return
+        if self._annotation_manager is None:
+            return
+
+        from qgis.core import QgsProject
+        project = QgsProject.instance()
+        project_path = project.fileName()
+        if not project_path:
+            return
+
+        project_dir = os.path.dirname(project_path)
+        current_gpkg = self._annotation_manager.gpkg_path
+        target_gpkg = os.path.join(project_dir, "annotations.gpkg")
+
+        if os.path.abspath(current_gpkg) == os.path.abspath(target_gpkg):
+            return  # ya está en la carpeta del proyecto
+
+        import shutil
+        try:
+            shutil.copy2(current_gpkg, target_gpkg)
+        except Exception as e:
+            self.iface.messageBar().pushMessage(
+                "Aviso",
+                f"No se pudo guardar las anotaciones junto al proyecto: {e}",
+                level=2,
+            )
+            return
+
+        # Reapuntar la capa al GPKG nuevo (en la carpeta del proyecto).
+        layer = self._annotation_manager.layer
+        layer.setDataSource(
+            f"{target_gpkg}|layername=annotations",
+            layer.name(),
+            "ogr",
+        )
+        self._annotation_manager.gpkg_path = target_gpkg
+
+        # Reescribir el .qgs para que persista la nueva ruta de la capa.
+        # Guard para evitar que el propio re-save dispare otra vez este
+        # handler en bucle infinito.
+        self._suppress_save_handler = True
+        try:
+            project.write()
+        finally:
+            self._suppress_save_handler = False
+
+    def _on_project_cleared(self):
+        """Al cerrar/cambiar de proyecto, soltar la referencia al manager
+        para que el próximo proyecto/sesión empiece desde cero (con un
+        .gpkg temporal nuevo)."""
+        self._annotation_manager = None
+
+    def _on_project_read(self, *_args):
+        """Cuando se termina de cargar un proyecto, si trae una capa de
+        anotaciones, inicializar el manager apuntando a ese GPKG.
+
+        Sin esto, los botones aprobar/rechazar no se enganchan a la
+        señal selectionChanged hasta que el usuario dibuje algo.
+        """
+        if self._buscar_gpkg_en_proyecto() is not None:
+            self._get_or_create_annotation_manager()
+
+    def _activar_herramienta_dibujo(self):
+        # Activa la herramienta de dibujo de polígonos en el canvas
+        canvas = self.iface.mapCanvas()
+
+        # Inicializar el manager si no existe aún
+        self._get_or_create_annotation_manager()
+
+        # Crear y activar la herramienta de dibujo
+        self._draw_tool = PolygonDrawTool(
+            canvas, self._on_poligono_dibujado, self.iface)
+        canvas.setMapTool(self._draw_tool)
+
+        self.iface.messageBar().pushMessage(
+            "GeoGlyph",
+            "Clic izquierdo: agregar vértice | Clic derecho: cerrar polígono | Escape: cancelar",
+            level=0,
+            duration=5)
+
+    def _on_poligono_dibujado(self, geometry):
+        # Callback que recibe el polígono terminado y lo guarda.
+        if self._annotation_manager is None:
+            return
+
+        # TIGS-64: persistir realmente la anotación. Antes este bug dejaba
+        # los polígonos solo en pantalla y no llegaban al .gpkg, así que
+        # tampoco se podían aprobar/rechazar.
+        self._annotation_manager.agregar_anotacion(geometry)
+        self.iface.messageBar().pushMessage(
+            "GeoGlyph",
+            "Anotación guardada — estado: pending | origen: human",
+            level=0,
+            duration=3
+        )
+
+        # Volver a la herramienta de navegación normal
+        self.iface.mapCanvas().unsetMapTool(self._draw_tool)
+
+    # ── TIGS-53: Selección de ROI rectangular y envío a /infer ──────────────
+
+    def _activar_herramienta_roi(self):
+        """Activa la herramienta `RectangularROITool` sobre el canvas.
+
+        Verifica que haya una capa raster activa antes de habilitar la
+        selección — sin raster no tiene sentido seleccionar un ROI.
+        """
+        if self.panel is None:
+            # Evita crash si el panel aún no está creado o ya fue liberado.
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                "El panel de GeoGlyph no está disponible. Reabre el panel e intenta nuevamente.",
+                level=1,
+                duration=4,
+            )
+            return
+
+        # Validar que haya una capa raster seleccionada.
+        layer = self.iface.activeLayer()
+        if not isinstance(layer, QgsRasterLayer):
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                "Selecciona primero una capa raster para definir el ROI.",
+                level=1,
+                duration=4,
+            )
+            return
+
+        # Deshabilitar el botón para evitar múltiples selecciones concurrentes
+        self.panel.btn_roi.setEnabled(False)
+
+        canvas = self.iface.mapCanvas()
+        # Crear la herramienta y guardarla como atributo para evitar que el
+        # GC la elimine — Qt requiere que el objeto siga vivo mientras esté
+        # asignado como mapTool.
+        self._roi_tool = RectangularROITool(
+            canvas, self._on_roi_seleccionado, self.iface
+        )
+        canvas.setMapTool(self._roi_tool)
+
+        # Mensaje de instrucciones al usuario.
+        self.iface.messageBar().pushMessage(
+            "GeoGlyph",
+            "Arrastra con clic izquierdo para definir un ROI rectangular. "
+            "Esc cancela.",
+            level=0,
+            duration=5,
+        )
+
+    def _on_roi_seleccionado(self, rect):
+        """Callback que recibe el QgsRectangle seleccionado por el usuario (TIGS-70).
+
+        Pasos:
+          1. Extraer metadatos del recorte raster (bbox, image_path, EPSG).
+          2. Extraer los píxeles de la imagen del ROI.
+          3. Lanzar SamWorker (httpx) en hilo aparte con la imagen.
+          4. Mostrar "Procesando con SAM..." hasta que termine.
+          5. Si el backend está caído, avisar pero NO bloquear la anotación manual
+             (degradación controlada — DoD TIGS-53, TIGS-70).
+        """
+        if self.panel is None:
+            # Puede ocurrir si el plugin se descargó mientras la map tool seguía activa.
+            return
+
+        layer = self.iface.activeLayer()
+
+        # 1. Extraer metadatos del recorte. Si la ROI cae fuera del raster
+        # o la capa no es válida, el helper levanta ValueError → se avisa
+        # al usuario y se aborta.
+        try:
+            # El valor de retorno no se usa: solo nos importa el efecto
+            # secundario (que lance ValueError si la ROI cae fuera del raster).
+            extract_raster_crop(layer, rect)
+        except ValueError as e:
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph", str(e), level=1, duration=4
+            )
+            self.panel.btn_roi.setEnabled(True)  # Rehabilitar botón en error
+            return
+
+        # 2. Extraer los píxeles de la imagen (TIGS-70)
+        try:
+            image_array = extract_raster_pixels(layer, rect)
+        except ValueError as e:
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph", f"Error extrayendo píxeles: {str(e)}", level=2, duration=4
+            )
+            self.panel.btn_roi.setEnabled(True)  # Rehabilitar botón en error
+            return
+
+        # Evitar llamadas concurrentes al backend desde la misma sesión.
+        if self._sam_worker is not None and self._sam_worker.isRunning():
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                "Ya hay una inferencia SAM en curso, espera a que termine.",
+                level=1,
+                duration=3,
+            )
+            self.panel.btn_roi.setEnabled(True)  # Rehabilitar botón, no se inició nueva inferencia
+            return
+
+        # 3. Mantener el botón deshabilitado durante la inferencia y mostrar "Procesando con SAM..."
+        # El botón ya fue deshabilitado en _activar_herramienta_roi() y se mantendrá deshabilitado
+        # hasta que termine la inferencia en _on_sam_finished() o _on_sam_error()
+        self.panel.lbl_status.setText(
+            f"Estado: Procesando con SAM ({image_array.shape[1]}x"
+            f"{image_array.shape[0]}px)..."
+        )
+        self.panel.lbl_status.setStyleSheet(
+            "color: black; font-size: 10px; margin-left: 4px;"
+        )
+
+        # 4. Lanzar SamWorker con la imagen (URL base configurable, default localhost)
+        # TODO: hacer la URL configurable desde un panel de configuración
+        self._sam_worker = SamWorker(
+            image=image_array,
+            url="http://localhost:8000",
+            points=None,  # Por ahora sin puntos de refinamiento
+            labels=None,
+        )
+        self._sam_worker.finished.connect(self._on_sam_finished)
+        self._sam_worker.error.connect(self._on_sam_error)
+
+        # Bloquear btn_inferencia mientras hay una inferencia SAM en curso
+        self.panel.btn_inferencia.setEnabled(False)
+
+        self._sam_worker.start()
+
+    def _on_infer_ok(self, status_code, elapsed, body):
+        """Callback ejecutado en el hilo principal cuando /infer responde OK.
+
+        El body sigue el contrato InferResponse de TIGS-49:
+            { status, detections[{polygon, confidence}], model_version,
+              timestamp, processing_time_ms }
+        """
+        detections = body.get("detections", []) if isinstance(body, dict) else []
+        print(f"DEBUG detections: {detections}")
+        print(f"DEBUG body: {body}")
+        n = len(detections)
+        # Mostramos en el label de estado el primer score (orientativo) +
+        # versión del modelo para distinguir mock vs SAM real.
+        if n > 0 and isinstance(detections[0], dict):
+            conf = detections[0].get("confidence", "—")
+            model = body.get("model_version", "?")
+            self.panel.lbl_status.setText(
+                f"Estado: HTTP {status_code} · {elapsed:.2f}s · "
+                f"{n} det · score={conf} · modelo={model}"
+            )
+        else:
+            self.panel.lbl_status.setText(
+                f"Estado: HTTP {status_code} · {elapsed:.2f}s · sin detecciones"
+            )
+        self.panel.lbl_status.setStyleSheet(
+            "color: green; font-size: 10px; margin-left: 4px;"
+        )
+        self.panel.btn_infer.setEnabled(True)
+        primer_score = detections[0].get("confidence", 0) if detections else 0
+        self.panel.lbl_score.setText(f"Confianza: {primer_score:.0%}" if detections else "Confianza: sin detecciones")
+        # Convertir polígonos del backend a anotaciones en QGIS
+        manager = self._get_or_create_annotation_manager()
+        for det in detections:
+            puntos = [QgsPointXY(p[0], p[1]) for p in det.get("polygon", [])]
+            if len(puntos) < 3:
+                continue
+            geometry = QgsGeometry.fromPolygonXY([puntos])
+            manager.agregar_anotacion(
+                geometry,
+                origin="ml",
+                score=det.get("confidence")
+            )
+
+    def _on_infer_error(self, msg):
+        """Callback de error del worker /infer.
+
+        Degradación controlada (DoD TIGS-53): se notifica al usuario con
+        un QMessageBox + label de estado, pero la herramienta de anotación
+        manual sigue funcional — no se desactiva ni el panel ni el botón
+        de dibujo de polígonos.
+        """
+        # Import diferido para no cargar QtWidgets si nunca falla la inferencia.
+        from qgis.PyQt.QtWidgets import QMessageBox
+
+        # Mensaje en el label del panel (no intrusivo).
+        self.panel.lbl_status.setText(f"Error /infer: {msg}")
+        self.panel.lbl_status.setStyleSheet(
+            "color: red; font-size: 10px; margin-left: 4px;"
+        )
+        self.panel.btn_infer.setEnabled(True)
+        self.panel.lbl_score.setText("Confianza: —")
+
+        # QMessageBox modal pero sin bloquear el resto del plugin: deja
+        # claro al usuario que la inferencia falló y que aún puede seguir
+        # anotando manualmente.
+        QMessageBox.warning(
+            self.iface.mainWindow(),
+            "GeoGlyph — backend no disponible",
+            f"No se pudo enviar el ROI al backend:\n\n{msg}\n\n"
+            "Puedes seguir trabajando con la anotación manual "
+            "(\"Dibujar polígono\").",
+        )
+
+    # ── TIGS-70: handlers para SamWorker (SAM real) ────────────────────────
+
+    def _on_sam_finished(self, mask: np.ndarray, confidence: float):
+        """Callback ejecutado cuando SamWorker termina exitosamente.
+
+        Recibe la máscara binaria y el score de confianza del backend.
+
+        Args:
+            mask: np.ndarray de forma (H, W) con valores 0-255 (binaria).
+            confidence: float en [0, 1] que estima la confianza del modelo.
+        """
+        from qgis.core import QgsMessageLog, Qgis
+
+        if self.panel is None:
+            return
+
+        # Habilitar los botones de ROI e inferencia
+        self.panel.btn_roi.setEnabled(True)
+        self.panel.btn_inferencia.setEnabled(False)
+
+        # Actualizar el score de confianza en el panel (reemplazando el 87% hardcodeado)
+        self.panel.lbl_score.setText(f"Confianza: {confidence * 100:.1f}%")
+        self.panel.lbl_score.setStyleSheet(
+            "color: green; font-size: 10px; margin-left: 4px;"
+            if confidence >= 0.7
+            else "color: black; font-size: 10px; margin-left: 4px;"
+        )
+
+        # Mostrar estado de éxito en el panel
+        self.panel.lbl_status.setText(
+            f"Estado: SAM completado · confianza={confidence * 100:.1f}%"
+        )
+        self.panel.lbl_status.setStyleSheet(
+            "color: green; font-size: 10px; margin-left: 4px;"
+        )
+
+        # Loguear la máscara recibida (TIGS-70: por ahora solo log, conversión en TIGS-71)
+        QgsMessageLog.logMessage(
+            f"[TIGS-70] SAM ejecutado: máscara {mask.shape} recibida, "
+            f"confianza={confidence:.2f}",
+            "GeoGlyph",
+            level=Qgis.Info
+        )
+
+        # Debug: mostrar info de la máscara (se puede remover después)
+        n_pixels = (mask > 0).sum()
+        print(f"[TIGS-70] DEBUG SAM mask: shape={mask.shape}, "
+              f"foreground_pixels={n_pixels}, confidence={confidence}")
+
+    def _on_sam_error(self, msg: str):
+        """Callback ejecutado cuando SamWorker falla.
+
+        Se distingue entre errores de backend no disponible y errores
+        de inferencia para mostrar mensajes apropiados.
+
+        Args:
+            msg: mensaje de error del worker (p.ej. "HTTP 500: ...", "Backend no disponible").
+        """
+        from qgis.core import QgsMessageLog, Qgis
+
+        if self.panel is None:
+            return
+
+        # Habilitar los botones de ROI e inferencia para que el usuario pueda reintentar
+        self.panel.btn_roi.setEnabled(True)
+        self.panel.btn_inferencia.setEnabled(False)
+
+        # Mostrar error en el panel
+        self.panel.lbl_status.setText(f"Error SAM: {msg}")
+        self.panel.lbl_status.setStyleSheet(
+            "color: red; font-size: 10px; margin-left: 4px;"
+        )
+
+        # Resetear el score de confianza
+        self.panel.lbl_score.setText("Confianza: —")
+
+        # Loguear el error en QgsMessageLog
+        if "no disponible" in msg.lower() or "http" in msg.lower():
+            # Backend no disponible o error HTTP
+            level = Qgis.Warning
+            prefix = "[TIGS-70] Backend SAM no disponible"
+        else:
+            # Error de inferencia
+            level = Qgis.Critical
+            prefix = "[TIGS-70] Error durante inferencia SAM"
+
+        QgsMessageLog.logMessage(
+            f"{prefix}: {msg}",
+            "GeoGlyph",
+            level=level
+        )
+
+        # Mostrar notificación al usuario en la message bar (no intrusiva)
+        self.iface.messageBar().pushMessage(
+            "GeoGlyph — Error SAM",
+            f"{msg}. Puedes reintentar seleccionando otro ROI o anotando manualmente.",
+            level=1,  # warning
+            duration=5
+        )
+
+    # ── TIGS-64: handlers de aprobar / rechazar ────────────────────────────
+
+    def _on_seleccion_cambiada(self, *_args):
+        """Refresca el panel cuando cambia la selección sobre la capa annotations.
+
+        El acepta *_args porque la señal selectionChanged emite varios
+        argumentos (selected, deselected, clearAndSelect) que no nos importan
+        — solo usamos la cuenta actual de features seleccionados.
+        """
+        if self._annotation_manager is None:
+            return
+
+        seleccionados = self._annotation_manager.layer.selectedFeatureCount()
+        habilitar = seleccionados >= 1
+        self.panel.btn_aprobar.setEnabled(habilitar)
+        self.panel.btn_rechazar.setEnabled(habilitar)
+        self.panel.lbl_seleccion.setText(
+            f"Selección actual: {seleccionados} anotaciones"
+        )
+
+        # Cargar notas del feature seleccionado en el campo de texto
+        if seleccionados == 1:
+            feature = self._annotation_manager.layer.selectedFeatures()[0]
+            notas = self._annotation_manager.leer_notas(feature.id())
+            self.panel.input_notas.setText(notas)
+        else:
+            # Si hay 0 o más de 1 seleccionados, limpiar el campo
+            self.panel.input_notas.clear()
+
+    def _aprobar_seleccion(self):
+        self._cambiar_estado_seleccion("approve")
+
+    def _rechazar_seleccion(self):
+        self._cambiar_estado_seleccion("reject")
+
+    def _cambiar_estado_seleccion(self, accion: str):
+        """Aplica aprobar/rechazar a todos los features seleccionados.
+
+        accion: 'approve' o 'reject'. Se centraliza acá la iteración y el
+        manejo de errores para no duplicar código entre los dos handlers.
+        """
+        if self._annotation_manager is None:
+            return
+
+        features = self._annotation_manager.layer.selectedFeatures()
+        if not features:
+            return
+
+        ok_count = 0
+        errores = []
+        for feat in features:
+            try:
+                # Guardar las notas del panel antes de cambiar el estado
+                notas_actuales = self.panel.input_notas.text()
+                self._annotation_manager.guardar_notas(feat.id(), notas_actuales)
+                if accion == "approve":
+                    cambiado = self._annotation_manager.aprobar_anotacion(
+                        feat.id())
+                else:
+                    cambiado = self._annotation_manager.rechazar_anotacion(
+                        feat.id())
+                if cambiado:
+                    ok_count += 1
+            except StateTransitionError as e:
+                # Una transición inválida (p.ej. aprobar algo ya aprobado)
+                # no es fatal: la registramos y seguimos con los demás.
+                errores.append(str(e))
+
+        # Feedback al usuario en la message bar de QGIS
+        if ok_count and not errores:
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                f"{ok_count} anotación(es) actualizadas",
+                level=0,
+                duration=3,
+            )
+        elif ok_count and errores:
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                f"{ok_count} actualizadas, {len(errores)} con error: "
+                f"{errores[0]}",
+                level=1,  # warning
+                duration=4,
+            )
+        else:
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                f"No se pudo actualizar ninguna anotación: {errores[0] if errores else 'razón desconocida'}",
+                level=2,  # error
+                duration=4,
+            )
+
+    def _ejecutar_infer(self):
+        # Lanza InferWorker para llamar POST /infer y renderizar polígonos.
+        if self._infer_worker is not None and self._infer_worker.isRunning():
+            return
+
+        self.panel.btn_infer.setEnabled(False)
+        self.panel.lbl_status.setText("Estado: Conectando con backend...")
+        self.panel.lbl_status.setStyleSheet(
+            "color: orange; font-size: 10px; margin-left: 4px;"
+        )
+
+        layer = self.iface.activeLayer()
+        if layer is not None:
+            ext = layer.extent()
+            bbox = [ext.xMinimum(), ext.yMinimum(), ext.xMaximum(), ext.yMaximum()]
+        else:
+            bbox = [0, 0, 256, 256]
+
+        self._infer_worker = InferWorker(bbox=bbox)
+        self._infer_worker.finished.connect(self._on_infer_ok)
+        self._infer_worker.error.connect(self._on_infer_error)
+        self._infer_worker.start()

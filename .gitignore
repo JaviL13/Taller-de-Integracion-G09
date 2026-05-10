@@ -5,6 +5,10 @@ __pycache__/
 # Entornos virtuales
 venv/
 backend/venv/
+.venv/
 
 # OS
 .DS_Store
+
+# Datos generados por el plugin
+annotations.gpkg
