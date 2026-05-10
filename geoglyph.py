@@ -439,7 +439,7 @@ class GeoGlyph:
         self.panel.lbl_status.setStyleSheet(
             "color: green; font-size: 10px; margin-left: 4px;"
         )
-        self.panel.btn_inferencia.setEnabled(True)
+        self.panel.btn_inferencia.setEnabled(False)
 
         # TIGS 57 - Lógica para devolver el score de confianza ─────────────────────────────
         detecciones = body.get("detections", [])  # Esta es la lista de detecciones del backend
@@ -448,9 +448,9 @@ class GeoGlyph:
             if confianza is not None:
                 self.panel.lbl_confianza.setText(f"Confianza: {confianza * 100:.0f}%")  # Confianza de decimal a %
                 self.panel.lbl_confianza.setStyleSheet(
-                    "color: green; font-size: 10px; margin-left: 4px;"  # Verde si es >= 70%, naranja si es menor
+                    "color: green; font-size: 10px; margin-left: 4px;"  # Verde si es >= 70%, negro si es menor
                     if confianza >= 0.7
-                    else "color: orange; font-size: 10px; margin-left: 4px;"
+                    else "color: black; font-size: 10px; margin-left: 4px;"
                 )
         else:
             # Si no hay detecciones, resetear el label
@@ -465,7 +465,7 @@ class GeoGlyph:
         self.panel.lbl_status.setStyleSheet(
             "color: red; font-size: 10px; margin-left: 4px;"
         )
-        self.panel.btn_inferencia.setEnabled(True)
+        self.panel.btn_inferencia.setEnabled(False)
 
     def _get_or_create_annotation_manager(self):
         """Lazy-init del AnnotationManager.
@@ -545,6 +545,16 @@ class GeoGlyph:
         Verifica que haya una capa raster activa antes de habilitar la
         selección — sin raster no tiene sentido seleccionar un ROI.
         """
+        if self.panel is None:
+            # Evita crash si el panel aún no está creado o ya fue liberado.
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                "El panel de GeoGlyph no está disponible. Reabre el panel e intenta nuevamente.",
+                level=1,
+                duration=4,
+            )
+            return
+
         # Validar que haya una capa raster seleccionada.
         layer = self.iface.activeLayer()
         if not isinstance(layer, QgsRasterLayer):
@@ -588,6 +598,10 @@ class GeoGlyph:
           5. Si el backend está caído, avisar pero NO bloquear la anotación manual
              (degradación controlada — DoD TIGS-53, TIGS-70).
         """
+        if self.panel is None:
+            # Puede ocurrir si el plugin se descargó mientras la map tool seguía activa.
+            return
+
         layer = self.iface.activeLayer()
 
         # 1. Extraer metadatos del recorte. Si la ROI cae fuera del raster
@@ -631,7 +645,7 @@ class GeoGlyph:
             f"{image_array.shape[0]}px)..."
         )
         self.panel.lbl_status.setStyleSheet(
-            "color: orange; font-size: 10px; margin-left: 4px;"
+            "color: black; font-size: 10px; margin-left: 4px;"
         )
 
         # 4. Lanzar SamWorker con la imagen (URL base configurable, default localhost)
@@ -736,16 +750,19 @@ class GeoGlyph:
         """
         from qgis.core import QgsMessageLog, Qgis
 
+        if self.panel is None:
+            return
+
         # Habilitar los botones de ROI e inferencia
         self.panel.btn_roi.setEnabled(True)
-        self.panel.btn_inferencia.setEnabled(True)
+        self.panel.btn_inferencia.setEnabled(False)
 
         # Actualizar el score de confianza en el panel (reemplazando el 87% hardcodeado)
         self.panel.lbl_score.setText(f"Confianza: {confidence * 100:.1f}%")
         self.panel.lbl_score.setStyleSheet(
             "color: green; font-size: 10px; margin-left: 4px;"
             if confidence >= 0.7
-            else "color: orange; font-size: 10px; margin-left: 4px;"
+            else "color: black; font-size: 10px; margin-left: 4px;"
         )
 
         # Mostrar estado de éxito en el panel
@@ -780,9 +797,12 @@ class GeoGlyph:
         """
         from qgis.core import QgsMessageLog, Qgis
 
+        if self.panel is None:
+            return
+
         # Habilitar los botones de ROI e inferencia para que el usuario pueda reintentar
         self.panel.btn_roi.setEnabled(True)
-        self.panel.btn_inferencia.setEnabled(True)
+        self.panel.btn_inferencia.setEnabled(False)
 
         # Mostrar error en el panel
         self.panel.lbl_status.setText(f"Error SAM: {msg}")

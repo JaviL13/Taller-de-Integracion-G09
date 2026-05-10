@@ -175,9 +175,9 @@ class GeoGlyphPanel(QDockWidget):
 
         self.btn_inferencia = QPushButton("Ejecutar inferencia SAM")
         self.btn_inferencia.setToolTip(
-            "Envía la región seleccionada al backend FastAPI (POST /enhance)"
+            "Temporalmente deshabilitado: la inferencia SAM se ejecuta automáticamente al seleccionar ROI"
         )
-        self.btn_inferencia.setEnabled(True)  # habilitado en TIGS-42
+        self.btn_inferencia.setEnabled(False)
         layout.addWidget(self.btn_inferencia)
 
         # Boton para renderizar
