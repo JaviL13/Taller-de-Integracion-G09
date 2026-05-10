@@ -1,14 +1,14 @@
 # Esta herramiento permite dibujar los polígonos dentro de QGIS
 
-from qgis.PyQt.QtCore import Qt
-from qgis.PyQt.QtGui import QColor
+from qgis.core import QgsGeometry, QgsPointXY, QgsWkbTypes
+
 # Con esto se pueden sontruir las geométrias con los clics del mouse
 from qgis.gui import QgsMapTool, QgsRubberBand
-from qgis.core import QgsWkbTypes, QgsPointXY, QgsGeometry
+from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtGui import QColor
 
 
 class PolygonDrawTool(QgsMapTool):
-
     # Se puede dibujar un polígono al presionar sobre el canvas
     # Botón derecho del mouse agrega vértice
     # Botón izquierdo del mouse cierra y guerda el polígono
@@ -24,10 +24,8 @@ class PolygonDrawTool(QgsMapTool):
 
         # RubberBand es una línea visual que se dibuja mientras el usuario hace
         # clic
-        self.rubber_band = QgsRubberBand(
-            self.canvas, QgsWkbTypes.PolygonGeometry)
-        self.rubber_band.setColor(
-            QColor(255, 0, 0, 100))  # color rojo por ahora
+        self.rubber_band = QgsRubberBand(self.canvas, QgsWkbTypes.PolygonGeometry)
+        self.rubber_band.setColor(QColor(255, 0, 0, 100))  # color rojo por ahora
         self.rubber_band.setWidth(2)
 
     def canvasPressEvent(self, event):
@@ -46,7 +44,8 @@ class PolygonDrawTool(QgsMapTool):
                 self._finalizar_poligono()
             else:
                 self.iface.messageBar().pushMessage(
-                    "GeoGlyph", "Necesitas al menos 3 puntos para crear un polígono.", level=1)
+                    "GeoGlyph", "Necesitas al menos 3 puntos para crear un polígono.", level=1
+                )
 
     def keyPressEvent(self, event):
         # Cancela el dibujo apretando Esc

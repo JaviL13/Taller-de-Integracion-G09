@@ -46,9 +46,7 @@ def _make_correlated_rgb(height, width, seed=0):
     """Bandas altamente correlacionadas, como ortofoto de desierto."""
     rng = np.random.default_rng(seed)
     lat = rng.normal(128, 40, size=(height, width, 3)).astype(np.float32)
-    mix = np.array(
-        [[0.6, 0.3, 0.1], [0.3, 0.6, 0.1], [0.1, 0.3, 0.6]], dtype=np.float32
-    )
+    mix = np.array([[0.6, 0.3, 0.1], [0.3, 0.6, 0.1], [0.1, 0.3, 0.6]], dtype=np.float32)
     img = np.einsum("hwc,cn->hwn", lat, mix)
     return np.clip(img, 0, 255).astype(np.uint8)
 
@@ -79,9 +77,7 @@ def test_core_decorrelates_channels():
     dst_corr = np.corrcoef(out.reshape(-1, 3).T)
     src_off = np.abs(src_corr - np.eye(3)).sum()
     dst_off = np.abs(dst_corr - np.eye(3)).sum()
-    assert dst_off < src_off, (
-        f"Corr fuera-de-diag NO disminuyó: src={src_off:.2f} dst={dst_off:.2f}"
-    )
+    assert dst_off < src_off, f"Corr fuera-de-diag NO disminuyó: src={src_off:.2f} dst={dst_off:.2f}"
 
 
 def test_core_respects_nodata_mask():
@@ -146,8 +142,7 @@ def test_regularization_caps_stretch_matrix_norm():
     X = primary + noise + np.array([128.0, 128.0, 128.0], dtype=np.float32)
 
     params_raw = _fit_stretch_params(X, saturation_pct=0.0, regularization=0.0)
-    params_reg = _fit_stretch_params(
-        X, saturation_pct=0.0, regularization=0.05)
+    params_reg = _fit_stretch_params(X, saturation_pct=0.0, regularization=0.05)
 
     # La norma Frobenius de M mide "cuánto estira en total" la transformación.
     # Con regularización, los ejes chicos se estiran menos → M tiene norma
@@ -155,10 +150,7 @@ def test_regularization_caps_stretch_matrix_norm():
     norm_raw = float(np.linalg.norm(params_raw["M"]))
     norm_reg = float(np.linalg.norm(params_reg["M"]))
 
-    assert norm_reg < norm_raw, (
-        f"La regularización no redujo la norma de M: raw={norm_raw:.2f}, "
-        f"reg={norm_reg:.2f}"
-    )
+    assert norm_reg < norm_raw, f"La regularización no redujo la norma de M: raw={norm_raw:.2f}, " f"reg={norm_reg:.2f}"
     # Además, con regularización la matriz debe estar mejor condicionada
     # (autovalores más parejos tras el inverso).
     cond_raw = params_raw["eigvals"].max() / params_raw["eigvals"].min()
@@ -174,9 +166,7 @@ def test_regularization_zero_is_backward_compatible():
     versión sin el parámetro (garantía de compatibilidad hacia atrás)."""
     img = _make_correlated_rgb(96, 96, seed=33)
     out_default, stats_default = _decorrelation_stretch_array(img)
-    out_explicit, stats_explicit = _decorrelation_stretch_array(
-        img, regularization=0.0
-    )
+    out_explicit, stats_explicit = _decorrelation_stretch_array(img, regularization=0.0)
     assert np.array_equal(out_default, out_explicit)
     assert stats_default["regularization"] == 0.0
 
@@ -211,9 +201,9 @@ def test_tiled_application_matches_full_image():
         for x in range(0, W, tile_size):
             th = min(tile_size, H - y)
             tw = min(tile_size, W - x)
-            tile = img[y: y + th, x: x + tw, :]
+            tile = img[y : y + th, x : x + tw, :]
             out_tile = _apply_stretch_params(tile, params, saturation_pct=1.0)
-            tiled[y: y + th, x: x + tw, :] = out_tile
+            tiled[y : y + th, x : x + tw, :] = out_tile
 
     assert np.array_equal(full, tiled)
 
@@ -237,16 +227,14 @@ def test_bilateral_numpy_reduces_noise_in_flat_region():
     noise = rng.normal(0, 10.0, size=(80, 80, 3)).astype(np.float32)
     img = np.clip(base + noise, 0, 255).astype(np.uint8)
 
-    filtered = _bilateral_filter_numpy(
-        img, d=7, sigma_color=25.0, sigma_space=7.0)
+    filtered = _bilateral_filter_numpy(img, d=7, sigma_color=25.0, sigma_space=7.0)
 
     var_before = img.astype(np.float32).var(axis=(0, 1)).mean()
     var_after = filtered.astype(np.float32).var(axis=(0, 1)).mean()
     # Con kernel d=7 y sigma_color=25 (>> σ del ruido), esperamos reducción
     # de al menos 50 % en zonas uniformes.
     assert var_after < var_before * 0.5, (
-        f"Bilateral no suavizó suficiente: antes={var_before:.1f}, "
-        f"después={var_after:.1f}"
+        f"Bilateral no suavizó suficiente: antes={var_before:.1f}, " f"después={var_after:.1f}"
     )
 
 
@@ -257,9 +245,7 @@ def test_bilateral_numpy_preserves_edges():
     img = np.zeros((40, 40, 3), dtype=np.uint8)
     img[:, 20:, :] = 255  # borde vertical fuerte en la mitad
 
-    filtered = _bilateral_filter_numpy(
-        img, d=7, sigma_color=25.0, sigma_space=7.0
-    )
+    filtered = _bilateral_filter_numpy(img, d=7, sigma_color=25.0, sigma_space=7.0)
 
     # La diferencia entre la columna 19 (negra) y la 20 (blanca) debe
     # seguir siendo alta. Un blur gaussiano la bajaría a ~128; el bilateral

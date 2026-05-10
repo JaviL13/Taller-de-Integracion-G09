@@ -43,6 +43,7 @@ def gpkg_path(tmp_path):
 # Estructura básica
 # ---------------------------------------------------------------------------
 
+
 def test_gpkg_magic_numbers(gpkg_path):
     """application_id y user_version deben coincidir con OGC 1.3."""
     conn = sqlite3.connect(gpkg_path)
@@ -60,8 +61,7 @@ def test_three_mer_tables_exist(gpkg_path):
     conn = sqlite3.connect(gpkg_path)
     try:
         rows = conn.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type='table' AND name IN ('sessions','detections','annotations');"
+            "SELECT name FROM sqlite_master " "WHERE type='table' AND name IN ('sessions','detections','annotations');"
         ).fetchall()
     finally:
         conn.close()
@@ -100,6 +100,7 @@ def test_spatial_tables_have_polygon_geometry(gpkg_path):
 # Compatibilidad con QGIS nativo
 # ---------------------------------------------------------------------------
 
+
 def test_gpkg_contents_registers_all_three_tables(gpkg_path):
     """gpkg_contents debe registrar las 3 tablas con el data_type correcto.
 
@@ -107,10 +108,7 @@ def test_gpkg_contents_registers_all_three_tables(gpkg_path):
     """
     conn = sqlite3.connect(gpkg_path)
     try:
-        rows = conn.execute(
-            "SELECT table_name, data_type FROM gpkg_contents "
-            "ORDER BY table_name;"
-        ).fetchall()
+        rows = conn.execute("SELECT table_name, data_type FROM gpkg_contents " "ORDER BY table_name;").fetchall()
     finally:
         conn.close()
     contents = dict(rows)
@@ -123,10 +121,7 @@ def test_srs_seed_present(gpkg_path):
     """gpkg_spatial_ref_sys debe contener -1, 0, 4326 y el SRS pedido."""
     conn = sqlite3.connect(gpkg_path)
     try:
-        ids = {
-            r[0]
-            for r in conn.execute("SELECT srs_id FROM gpkg_spatial_ref_sys;")
-        }
+        ids = {r[0] for r in conn.execute("SELECT srs_id FROM gpkg_spatial_ref_sys;")}
     finally:
         conn.close()
     assert {-1, 0, 4326, 32719}.issubset(ids)
@@ -136,12 +131,7 @@ def test_rtree_index_exists(gpkg_path):
     """Debe existir el R-tree espacial para ambas tablas con geometría."""
     conn = sqlite3.connect(gpkg_path)
     try:
-        names = {
-            r[0]
-            for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE name LIKE 'rtree_%';"
-            )
-        }
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE name LIKE 'rtree_%';")}
     finally:
         conn.close()
     # El R-tree virtual genera tabla principal + _node + _parent + _rowid.
@@ -153,16 +143,13 @@ def test_rtree_index_exists(gpkg_path):
 # Integridad referencial (FK)
 # ---------------------------------------------------------------------------
 
+
 def test_foreign_keys_declared(gpkg_path):
     """annotations debe declarar FK a sessions y a detections."""
     conn = sqlite3.connect(gpkg_path)
     try:
-        ann_fks = conn.execute(
-            "PRAGMA foreign_key_list(annotations);"
-        ).fetchall()
-        det_fks = conn.execute(
-            "PRAGMA foreign_key_list(detections);"
-        ).fetchall()
+        ann_fks = conn.execute("PRAGMA foreign_key_list(annotations);").fetchall()
+        det_fks = conn.execute("PRAGMA foreign_key_list(detections);").fetchall()
     finally:
         conn.close()
 
@@ -182,8 +169,7 @@ def test_insert_chain_session_detection_annotation(gpkg_path):
         cur = conn.cursor()
 
         cur.execute(
-            "INSERT INTO sessions (started_at, image_path, model_version, user) "
-            "VALUES (?, ?, ?, ?);",
+            "INSERT INTO sessions (started_at, image_path, model_version, user) " "VALUES (?, ?, ?, ?);",
             ("2026-04-25T10:00:00Z", "/data/cerro_unita.tif", "sam_vit_h", "fer"),
         )
         sid = cur.lastrowid
@@ -203,8 +189,7 @@ def test_insert_chain_session_detection_annotation(gpkg_path):
             "(geom, session_id, detection_id, label, origin, status, "
             " confidence, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
-            (dummy_geom, sid, det_id, "antropomorfo",
-             "ml", "approved", 0.87, "2026-04-25T10:06:00Z"),
+            (dummy_geom, sid, det_id, "antropomorfo", "ml", "approved", 0.87, "2026-04-25T10:06:00Z"),
         )
         ann_id = cur.lastrowid
         conn.commit()
@@ -221,9 +206,7 @@ def test_fk_violation_rejected(gpkg_path):
         conn.execute("PRAGMA foreign_keys = ON;")
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
-                "INSERT INTO annotations "
-                "(geom, session_id, origin, created_at) "
-                "VALUES (?, ?, ?, ?);",
+                "INSERT INTO annotations " "(geom, session_id, origin, created_at) " "VALUES (?, ?, ?, ?);",
                 (b"\x00" * 32, 99999, "human", "2026-04-25T10:00:00Z"),
             )
     finally:
@@ -233,6 +216,7 @@ def test_fk_violation_rejected(gpkg_path):
 # ---------------------------------------------------------------------------
 # Validaciones de dominio (CHECK constraints)
 # ---------------------------------------------------------------------------
+
 
 def test_origin_check_constraint(gpkg_path):
     """origin solo debe aceptar 'ml' o 'human'."""
@@ -245,9 +229,7 @@ def test_origin_check_constraint(gpkg_path):
         )
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
-                "INSERT INTO annotations "
-                "(geom, session_id, origin, created_at) "
-                "VALUES (?, ?, ?, ?);",
+                "INSERT INTO annotations " "(geom, session_id, origin, created_at) " "VALUES (?, ?, ?, ?);",
                 (b"\x00" * 32, 1, "robot", "2026-04-25T10:00:00Z"),
             )
     finally:
@@ -265,9 +247,7 @@ def test_status_check_constraint(gpkg_path):
         )
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
-                "INSERT INTO annotations "
-                "(geom, session_id, origin, status, created_at) "
-                "VALUES (?, ?, ?, ?, ?);",
+                "INSERT INTO annotations " "(geom, session_id, origin, status, created_at) " "VALUES (?, ?, ?, ?, ?);",
                 (b"\x00" * 32, 1, "human", "maybe", "2026-04-25T10:00:00Z"),
             )
     finally:
@@ -277,6 +257,7 @@ def test_status_check_constraint(gpkg_path):
 # ---------------------------------------------------------------------------
 # CLI / errores de uso
 # ---------------------------------------------------------------------------
+
 
 def test_invalid_crs_raises(tmp_path):
     """Un CRS no soportado debe lanzar ValueError."""

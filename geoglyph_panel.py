@@ -1,11 +1,7 @@
 # -*- coding: utf-8 -*-
 # import os
-from qgis.PyQt.QtWidgets import (
-    QDockWidget, QWidget, QVBoxLayout,
-    QPushButton, QLabel, QFrame, QComboBox,
-    QLineEdit
-)
 from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtWidgets import QComboBox, QDockWidget, QFrame, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 
 class GeoGlyphPanel(QDockWidget):
@@ -22,7 +18,8 @@ class GeoGlyphPanel(QDockWidget):
         # Widget contenedor principal
         # No se pueden poner botones por separado, por eso un widget contenedor
         from qgis.PyQt.QtWidgets import QScrollArea
-        scroll = QScrollArea()                          # Agregué un scroll para que se vea el panel completo
+
+        scroll = QScrollArea()  # Agregué un scroll para que se vea el panel completo
         scroll.setWidgetResizable(True)
         container = QWidget()
         layout = QVBoxLayout()
@@ -33,9 +30,7 @@ class GeoGlyphPanel(QDockWidget):
         layout.addWidget(self._seccion_titulo(" Cargar imagen"))
 
         self.btn_abrir_tiff = QPushButton("Abrir GeoTIFF")
-        self.btn_abrir_tiff.setToolTip(
-            "Abre un archivo GeoTIFF y lo agrega como capa raster en QGIS"
-        )
+        self.btn_abrir_tiff.setToolTip("Abre un archivo GeoTIFF y lo agrega como capa raster en QGIS")
         layout.addWidget(self.btn_abrir_tiff)
 
         layout.addWidget(self._separador())
@@ -79,8 +74,7 @@ class GeoGlyphPanel(QDockWidget):
         self.toggle_ui()
 
         btn_side_by_side = QPushButton("Vista Side-by-Side")
-        btn_side_by_side.setToolTip(
-            "Compara dos configuraciones de visualización en paralelo (próximamente)")
+        btn_side_by_side.setToolTip("Compara dos configuraciones de visualización en paralelo (próximamente)")
         btn_side_by_side.setEnabled(False)
         layout.addWidget(btn_side_by_side)
 
@@ -92,9 +86,7 @@ class GeoGlyphPanel(QDockWidget):
         # Botón para dibujar el polígono
         self.btn_dibujar = QPushButton("Dibujar polígono")
         self.btn_dibujar.setToolTip(
-            "Activa la herramienta de dibujo: "
-            "clic izquierdo agrega vértices, "
-            "clic derecho cierra el polígono"
+            "Activa la herramienta de dibujo: " "clic izquierdo agrega vértices, " "clic derecho cierra el polígono"
         )
         layout.addWidget(self.btn_dibujar)
 
@@ -109,16 +101,14 @@ class GeoGlyphPanel(QDockWidget):
         layout.addWidget(self.btn_roi)
 
         btn_importar = QPushButton("Importar detecciones")
-        btn_importar.setToolTip(
-            "Importa detecciones en formato GeoJSON o probability map TIFF (próximamente)")
+        btn_importar.setToolTip("Importa detecciones en formato GeoJSON o probability map TIFF (próximamente)")
         btn_importar.setEnabled(False)
         layout.addWidget(btn_importar)
 
         # Exportar la capa realzada como GeoTIFF
         self.btn_exportar = QPushButton("Exportar Capa Realzada")
         # Tooltip que explica qué hace el botón
-        self.btn_exportar.setToolTip(
-            "Guarda la capa realzada activa como archivo GeoTIFF")
+        self.btn_exportar.setToolTip("Guarda la capa realzada activa como archivo GeoTIFF")
         # Habilitado para hacerle clic
         self.btn_exportar.setEnabled(True)
         layout.addWidget(self.btn_exportar)
@@ -136,17 +126,13 @@ class GeoGlyphPanel(QDockWidget):
         # feedback inmediato para que el usuario sepa por qué los botones
         # están deshabilitados (porque no hay nada seleccionado).
         self.lbl_seleccion = QLabel("Selección actual: 0 anotaciones")
-        self.lbl_seleccion.setStyleSheet(
-            "color: gray; font-size: 10px; margin-left: 4px;"
-        )
+        self.lbl_seleccion.setStyleSheet("color: gray; font-size: 10px; margin-left: 4px;")
         layout.addWidget(self.lbl_seleccion)
 
         # Label para mostrar el score de confianza de la detección
         # El valor se actualiza desde geoglyph.py con el resultado del backend
         self.lbl_confianza = QLabel("Confianza: —")
-        self.lbl_confianza.setStyleSheet(
-            "color: gray; font-size: 10px; margin-left: 4px;"
-        )
+        self.lbl_confianza.setStyleSheet("color: gray; font-size: 10px; margin-left: 4px;")
         layout.addWidget(self.lbl_confianza)
 
         # Campo de texto libre para observaciones
@@ -155,16 +141,12 @@ class GeoGlyphPanel(QDockWidget):
         layout.addWidget(self.input_notas)
 
         self.btn_aprobar = QPushButton("Aprobar")
-        self.btn_aprobar.setToolTip(
-            "Marca la anotación seleccionada como aprobada (verde)"
-        )
+        self.btn_aprobar.setToolTip("Marca la anotación seleccionada como aprobada (verde)")
         self.btn_aprobar.setEnabled(False)
         layout.addWidget(self.btn_aprobar)
 
         self.btn_rechazar = QPushButton("Rechazar")
-        self.btn_rechazar.setToolTip(
-            "Marca la anotación seleccionada como rechazada (rojo)"
-        )
+        self.btn_rechazar.setToolTip("Marca la anotación seleccionada como rechazada (rojo)")
         self.btn_rechazar.setEnabled(False)
         layout.addWidget(self.btn_rechazar)
 
@@ -182,17 +164,14 @@ class GeoGlyphPanel(QDockWidget):
 
         # Boton para renderizar
         self.btn_infer = QPushButton("Renderizar segmentación")
-        self.btn_infer.setToolTip(
-            "Llama a POST /infer y renderiza los polígonos resultantes como capa vectorial"
-        )
+        self.btn_infer.setToolTip("Llama a POST /infer y renderiza los polígonos resultantes como capa vectorial")
         self.btn_infer.setEnabled(True)
         layout.addWidget(self.btn_infer)
 
         # Label de estado de la última llamada HTTP
         self.lbl_status = QLabel("Estado: —")
         self.lbl_status.setWordWrap(True)
-        self.lbl_status.setStyleSheet(
-            "color: gray; font-size: 10px; margin-left: 4px;")
+        self.lbl_status.setStyleSheet("color: gray; font-size: 10px; margin-left: 4px;")
         layout.addWidget(self.lbl_status)
 
         # Label de score de confianza que devuelve el backend después de la inferencia

@@ -35,7 +35,6 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 
-
 # ---------------------------------------------------------------------------
 # Constantes del estándar OGC GeoPackage 1.3
 # ---------------------------------------------------------------------------
@@ -210,6 +209,7 @@ DDL_INDEXES = [
 # DDL del índice R-tree (formato OGC GeoPackage)
 # ---------------------------------------------------------------------------
 
+
 def _rtree_ddl(table: str) -> list[str]:
     """Devuelve las sentencias para crear el R-tree espacial de una tabla.
 
@@ -228,6 +228,7 @@ def _rtree_ddl(table: str) -> list[str]:
 # Función pública
 # ---------------------------------------------------------------------------
 
+
 def init_gpkg(path: str, crs_epsg: int = 32719, overwrite: bool = False) -> str:
     """Crea un GeoPackage vacío con el esquema MER de GeoGlyph.
 
@@ -245,17 +246,12 @@ def init_gpkg(path: str, crs_epsg: int = 32719, overwrite: bool = False) -> str:
         ValueError: si `crs_epsg` no está en SUPPORTED_CRS.
     """
     if crs_epsg not in SUPPORTED_CRS:
-        raise ValueError(
-            f"CRS EPSG:{crs_epsg} no soportado. "
-            f"Disponibles: {sorted(SUPPORTED_CRS)}"
-        )
+        raise ValueError(f"CRS EPSG:{crs_epsg} no soportado. " f"Disponibles: {sorted(SUPPORTED_CRS)}")
 
     path = os.path.abspath(path)
     if os.path.exists(path):
         if not overwrite:
-            raise FileExistsError(
-                f"{path} ya existe. Usa overwrite=True para reemplazar."
-            )
+            raise FileExistsError(f"{path} ya existe. Usa overwrite=True para reemplazar.")
         os.remove(path)
 
     # Aseguramos que el directorio destino exista (ej: scripts/, data/).
@@ -327,12 +323,9 @@ def init_gpkg(path: str, crs_epsg: int = 32719, overwrite: bool = False) -> str:
             "(table_name, data_type, identifier, description, "
             " last_change, srs_id) VALUES (?, ?, ?, ?, ?, ?);",
             [
-                ("sessions", "attributes", "sessions",
-                 "Sesiones de trabajo de anotación", now, 0),
-                ("detections", "features", "detections",
-                 "Candidatos detectados por modelos ML", now, crs_epsg),
-                ("annotations", "features", "annotations",
-                 "Anotaciones validadas por el arqueólogo", now, crs_epsg),
+                ("sessions", "attributes", "sessions", "Sesiones de trabajo de anotación", now, 0),
+                ("detections", "features", "detections", "Candidatos detectados por modelos ML", now, crs_epsg),
+                ("annotations", "features", "annotations", "Anotaciones validadas por el arqueólogo", now, crs_epsg),
             ],
         )
 
@@ -354,19 +347,26 @@ def init_gpkg(path: str, crs_epsg: int = 32719, overwrite: bool = False) -> str:
             "(table_name, column_name, extension_name, definition, scope) "
             "VALUES (?, ?, ?, ?, ?);",
             [
-                ("detections", "geom", "gpkg_rtree_index",
-                 "http://www.geopackage.org/spec120/#extension_rtree",
-                 "write-only"),
-                ("annotations", "geom", "gpkg_rtree_index",
-                 "http://www.geopackage.org/spec120/#extension_rtree",
-                 "write-only"),
+                (
+                    "detections",
+                    "geom",
+                    "gpkg_rtree_index",
+                    "http://www.geopackage.org/spec120/#extension_rtree",
+                    "write-only",
+                ),
+                (
+                    "annotations",
+                    "geom",
+                    "gpkg_rtree_index",
+                    "http://www.geopackage.org/spec120/#extension_rtree",
+                    "write-only",
+                ),
             ],
         )
 
         # -- 10. Inicializar contadores de OGR en cero.
         cur.executemany(
-            "INSERT INTO gpkg_ogr_contents (table_name, feature_count) "
-            "VALUES (?, ?);",
+            "INSERT INTO gpkg_ogr_contents (table_name, feature_count) " "VALUES (?, ?);",
             [("detections", 0), ("annotations", 0)],
         )
 
@@ -381,10 +381,11 @@ def init_gpkg(path: str, crs_epsg: int = 32719, overwrite: bool = False) -> str:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Inicializa el GeoPackage de GeoGlyph con las "
-                    "tres tablas del MER (sessions, detections, annotations).",
+        "tres tablas del MER (sessions, detections, annotations).",
     )
     parser.add_argument(
         "path",
@@ -395,8 +396,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=32719,
         choices=sorted(SUPPORTED_CRS),
-        help="Código EPSG del CRS para las tablas espaciales "
-             "(por defecto 32719 = UTM 19S, Atacama).",
+        help="Código EPSG del CRS para las tablas espaciales " "(por defecto 32719 = UTM 19S, Atacama).",
     )
     parser.add_argument(
         "--overwrite",

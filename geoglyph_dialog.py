@@ -24,16 +24,12 @@
 
 import os
 
-from qgis.PyQt import uic
-from qgis.PyQt import QtWidgets
-
-
-from qgis.core import QgsRasterLayer, QgsProject
+from qgis.core import QgsProject, QgsRasterLayer
+from qgis.PyQt import QtWidgets, uic
 
 # This loads your .ui file so that PyQt can populate your plugin with the
 # elements from Qt Designer
-FORM_CLASS, _ = uic.loadUiType(os.path.join(
-    os.path.dirname(__file__), 'geoglyph_dialog_base.ui'))
+FORM_CLASS, _ = uic.loadUiType(os.path.join(os.path.dirname(__file__), "geoglyph_dialog_base.ui"))
 
 
 class GeoGlyphDialog(QtWidgets.QDialog, FORM_CLASS):
@@ -50,6 +46,7 @@ class GeoGlyphDialog(QtWidgets.QDialog, FORM_CLASS):
 
         if self.layout() is None:
             from qgis.PyQt.QtWidgets import QVBoxLayout
+
             layout = QVBoxLayout()
             self.setLayout(layout)
 
@@ -62,12 +59,7 @@ class GeoGlyphDialog(QtWidgets.QDialog, FORM_CLASS):
 
     def open_geotiff(self):
         # Abre el explorador de archivos para seleccionar un .tif
-        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self,
-            "Seleccionar GeoTIFF",
-            "",
-            "GeoTIFF (*.tif *.tiff)"
-        )
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Seleccionar GeoTIFF", "", "GeoTIFF (*.tif *.tiff)")
 
         if not file_path:
             return  # El usuario canceló
@@ -79,11 +71,7 @@ class GeoGlyphDialog(QtWidgets.QDialog, FORM_CLASS):
         layer = QgsRasterLayer(file_path, layer_name)
 
         if not layer.isValid():
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Error",
-                f"No se pudo cargar el archivo:\n{file_path}"
-            )
+            QtWidgets.QMessageBox.critical(self, "Error", f"No se pudo cargar el archivo:\n{file_path}")
             return
 
         # Agregar la capa al proyecto de QGIS
@@ -97,7 +85,5 @@ class GeoGlyphDialog(QtWidgets.QDialog, FORM_CLASS):
         canvas.refresh()
 
         QtWidgets.QMessageBox.information(
-            self,
-            "Éxito",
-            f"Capa '{layer_name}' cargada correctamente.\nCRS: {layer.crs().authid()}"
+            self, "Éxito", f"Capa '{layer_name}' cargada correctamente.\nCRS: {layer.crs().authid()}"
         )

@@ -28,9 +28,7 @@ import pytest
 qgis_core = pytest.importorskip("qgis.core")
 
 # Permitir importar annotation_manager.py como módulo top-level.
-sys.path.insert(
-    0, os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-)
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from qgis.core import (  # noqa: E402
     QgsApplication,
@@ -43,8 +41,8 @@ from qgis.core import (  # noqa: E402
 import annotation_manager  # noqa: E402
 from annotation_state import AnnotationState  # noqa: E402
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────
+
 
 @pytest.fixture(scope="session")
 def qgis_app():
@@ -97,15 +95,14 @@ def _leer_status_con_sqlite(gpkg_path):
     (independiente de QGIS, valida que el archivo realmente persistió)."""
     conn = sqlite3.connect(gpkg_path)
     try:
-        rows = conn.execute(
-            "SELECT fid, status FROM annotations ORDER BY fid;"
-        ).fetchall()
+        rows = conn.execute("SELECT fid, status FROM annotations ORDER BY fid;").fetchall()
     finally:
         conn.close()
     return rows
 
 
 # ── Criterio: el GeoPackage se crea solo si no existe ────────────────────
+
 
 def test_crea_archivo_si_no_existe(qgis_app, crs, gpkg_path, proyecto_limpio):
     """Si annotations.gpkg no existe, el manager debe crearlo con la
@@ -119,18 +116,13 @@ def test_crea_archivo_si_no_existe(qgis_app, crs, gpkg_path, proyecto_limpio):
     # (es lo que hace QGIS para reconocerla como capa).
     conn = sqlite3.connect(gpkg_path)
     try:
-        rows = conn.execute(
-            "SELECT table_name FROM gpkg_contents "
-            "WHERE table_name='annotations';"
-        ).fetchall()
+        rows = conn.execute("SELECT table_name FROM gpkg_contents " "WHERE table_name='annotations';").fetchall()
     finally:
         conn.close()
     assert rows == [("annotations",)]
 
 
-def test_no_sobreescribe_archivo_existente(
-    qgis_app, crs, gpkg_path, proyecto_limpio
-):
+def test_no_sobreescribe_archivo_existente(qgis_app, crs, gpkg_path, proyecto_limpio):
     """Si el .gpkg ya existe, instanciar otro manager NO debe regenerarlo
     (mtime y contenido se preservan)."""
     # Manager A: crea el archivo y agrega un feature.
@@ -156,9 +148,8 @@ def test_no_sobreescribe_archivo_existente(
 
 # ── Criterio: pending al crear, persiste al GPKG ─────────────────────────
 
-def test_agregar_anotacion_persiste_como_pending(
-    qgis_app, crs, gpkg_path, proyecto_limpio
-):
+
+def test_agregar_anotacion_persiste_como_pending(qgis_app, crs, gpkg_path, proyecto_limpio):
     """Tras agregar_anotacion, sqlite3 debe ver una fila con status=pending."""
     mgr = annotation_manager.AnnotationManager(gpkg_path, crs)
     mgr.agregar_anotacion(_polygon_dummy())
@@ -170,9 +161,8 @@ def test_agregar_anotacion_persiste_como_pending(
 
 # ── Criterio: aprobar persiste con status='approved' ─────────────────────
 
-def test_aprobar_persiste_status_approved(
-    qgis_app, crs, gpkg_path, proyecto_limpio
-):
+
+def test_aprobar_persiste_status_approved(qgis_app, crs, gpkg_path, proyecto_limpio):
     mgr = annotation_manager.AnnotationManager(gpkg_path, crs)
     feat = mgr.agregar_anotacion(_polygon_dummy())
 
@@ -186,9 +176,8 @@ def test_aprobar_persiste_status_approved(
 
 # ── Criterio: rechazar persiste con status='rejected' ────────────────────
 
-def test_rechazar_persiste_status_rejected(
-    qgis_app, crs, gpkg_path, proyecto_limpio
-):
+
+def test_rechazar_persiste_status_rejected(qgis_app, crs, gpkg_path, proyecto_limpio):
     mgr = annotation_manager.AnnotationManager(gpkg_path, crs)
     feat = mgr.agregar_anotacion(_polygon_dummy())
 
@@ -201,9 +190,8 @@ def test_rechazar_persiste_status_rejected(
 
 # ── Criterio: persiste al cerrar y reabrir QGIS ──────────────────────────
 
-def test_features_persisten_entre_managers(
-    qgis_app, crs, gpkg_path, proyecto_limpio
-):
+
+def test_features_persisten_entre_managers(qgis_app, crs, gpkg_path, proyecto_limpio):
     """Manager A agrega 3 polígonos (uno aprobado, uno rechazado, uno
     pending). Manager B nuevo (sobre el mismo .gpkg) debe verlos todos
     con sus estados intactos. Esto simula cerrar y reabrir QGIS."""
@@ -224,17 +212,14 @@ def test_features_persisten_entre_managers(
     mgr_b = annotation_manager.AnnotationManager(gpkg_path, crs)
     assert mgr_b.layer.featureCount() == 3
 
-    estados = sorted(
-        f.attribute("status") for f in mgr_b.layer.getFeatures()
-    )
+    estados = sorted(f.attribute("status") for f in mgr_b.layer.getFeatures())
     assert estados == ["approved", "pending", "rejected"]
 
 
 # ── Estado intermedio: cambios sucesivos persisten correctamente ─────────
 
-def test_aprobar_luego_rechazar_persiste_ultimo_estado(
-    qgis_app, crs, gpkg_path, proyecto_limpio
-):
+
+def test_aprobar_luego_rechazar_persiste_ultimo_estado(qgis_app, crs, gpkg_path, proyecto_limpio):
     """Si aprobamos y luego rechazamos, el archivo debe mostrar el
     último estado (rejected). Verifica que no hay caches que dejen
     versiones obsoletas en disco."""
@@ -249,9 +234,8 @@ def test_aprobar_luego_rechazar_persiste_ultimo_estado(
 
 # ── La capa expuesta es GPKG-backed, no de memoria ───────────────────────
 
-def test_capa_es_gpkg_backed_no_memory(
-    qgis_app, crs, gpkg_path, proyecto_limpio
-):
+
+def test_capa_es_gpkg_backed_no_memory(qgis_app, crs, gpkg_path, proyecto_limpio):
     """Asegura que el provider sea 'ogr' (GPKG-backed), no 'memory'.
     Si fuera 'memory', los cambios no llegarían al disco — la causa
     raíz del bug que este ticket arregla."""

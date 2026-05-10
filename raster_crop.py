@@ -23,11 +23,10 @@ Diseño:
   endpoint pase a aceptar bytes binarios.
 """
 
-from typing import Optional
 import os
+from typing import Optional
 
 import numpy as np
-
 from qgis.core import (
     QgsCoordinateTransform,
     QgsCoordinateTransformContext,
@@ -158,9 +157,7 @@ def extract_raster_pixels(layer: QgsRasterLayer, rect: QgsRectangle) -> np.ndarr
     canvas_crs = QgsProject.instance().crs()
 
     if canvas_crs != raster_crs:
-        transform = QgsCoordinateTransform(
-            canvas_crs, raster_crs, QgsCoordinateTransformContext()
-        )
+        transform = QgsCoordinateTransform(canvas_crs, raster_crs, QgsCoordinateTransformContext())
         roi_in_raster_crs = transform.transformBoundingBox(rect)
     else:
         roi_in_raster_crs = QgsRectangle(rect)
@@ -176,8 +173,7 @@ def extract_raster_pixels(layer: QgsRasterLayer, rect: QgsRectangle) -> np.ndarr
     source_path = (layer.source() or "").split("|", 1)[0].strip()
     if not source_path or not os.path.exists(source_path):
         raise ValueError(
-            "No se pudo leer el archivo fuente del raster. "
-            "Solo se admiten capas raster locales para SAM."
+            "No se pudo leer el archivo fuente del raster. " "Solo se admiten capas raster locales para SAM."
         )
 
     # Rasterio lee el recorte directamente desde el archivo fuente usando el
@@ -189,8 +185,7 @@ def extract_raster_pixels(layer: QgsRasterLayer, rect: QgsRectangle) -> np.ndarr
             from rasterio.windows import from_bounds
         except ImportError as exc:
             raise ValueError(
-                "rasterio no está instalado en el entorno de QGIS. "
-                "Instálalo para extraer el ROI del raster."
+                "rasterio no está instalado en el entorno de QGIS. " "Instálalo para extraer el ROI del raster."
             ) from exc
 
         with rasterio.open(source_path) as src:
