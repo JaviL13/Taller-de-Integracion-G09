@@ -1,3 +1,5 @@
+# el contenido dentro del archivo se ha ocupado IA para poder aplicar técnicas más
+# específicas y poder resolver errores de código que advertía la consola de qgis
 # coding: utf-8
 """
 Diálogo Qt para lanzar el Decorrelation Stretch desde QGIS.
@@ -356,6 +358,29 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
             fd, out = tempfile.mkstemp(
                 suffix="_dstretch.tif", prefix="geoglyph_")
             os.close(fd)
+        else:
+            # Si el usuario escribió solo un nombre (sin ruta), GDAL trata el
+            # string como path relativo al cwd de QGIS — que en macOS suele
+            # ser '/' (read-only) y revienta con "Read-only file system".
+            # Normalizamos: agregamos extensión .tif si falta y resolvemos
+            # rutas relativas contra la carpeta del raster de entrada.
+            if not out.lower().endswith((".tif", ".tiff")):
+                out += ".tif"
+            if not os.path.isabs(out):
+                base_dir = os.path.dirname(src) if src else os.path.expanduser("~")
+                out = os.path.join(base_dir, out)
+            # Validar que la carpeta destino exista y sea escribible.
+            parent = os.path.dirname(out)
+            if not os.path.isdir(parent) or not os.access(parent, os.W_OK):
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Ruta de salida inválida",
+                    f"No se puede escribir en:\n{parent}\n\n"
+                    "Usa el botón 'Examinar…' para elegir una carpeta válida, "
+                    "o escribe una ruta absoluta (ej. "
+                    "/Users/mimac/Desktop/resultado.tif).",
+                )
+                return
 
         # UI en modo "procesando"
         self.status_lbl.setText(

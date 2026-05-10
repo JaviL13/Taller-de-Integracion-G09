@@ -1,3 +1,5 @@
+# el contenido dentro del archivo se ha ocupado IA para poder aplicar técnicas más
+# específicas y poder resolver errores de código que advertía la consola de qgis
 # -*- coding: utf-8 -*-
 """Inicialización del GeoPackage de GeoGlyph (TIGS - persistencia MER).
 

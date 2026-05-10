@@ -1,3 +1,5 @@
+# el contenido dentro del archivo se ha ocupado IA para poder crear tests más
+# robustos y claros y poder testear escenarios difíciles
 # -*- coding: utf-8 -*-
 """Pruebas unitarias del módulo decorrelation_stretch.
 

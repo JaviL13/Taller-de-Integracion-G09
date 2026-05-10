@@ -1,3 +1,5 @@
+# el contenido dentro del archivo se ha ocupado IA para poder aplicar técnicas más
+# específicas y poder resolver errores de código que advertía la consola de qgis
 # Se encarga de guardar el polígono creado.
 # Crea una capa annotations respaldada por un archivo .gpkg en disco.
 # Cada cambio (agregar polígono, aprobar/rechazar) se persiste automáticamente
@@ -14,6 +16,7 @@ import os
 from datetime import datetime, timezone
 
 from qgis.core import (
+    NULL,
     QgsVectorLayer,
     QgsField,
     QgsFeature,
@@ -28,6 +31,19 @@ from qgis.core import (
 )
 from qgis.PyQt.QtCore import QVariant
 from qgis.PyQt.QtGui import QColor
+
+# Compatibilidad QGIS 3.38+: el constructor de QgsField con QVariant.Type
+# quedó deprecado y prefiere QMetaType.Type. Hacemos fallback por si el
+# plugin se ejecuta en una versión vieja de QGIS donde QMetaType no existe.
+try:
+    from qgis.PyQt.QtCore import QMetaType
+    _FIELD_STRING = QMetaType.Type.QString
+    _FIELD_DOUBLE = QMetaType.Type.Double
+    _FIELD_INT = QMetaType.Type.Int
+except (ImportError, AttributeError):
+    _FIELD_STRING = QVariant.String
+    _FIELD_DOUBLE = QVariant.Double
+    _FIELD_INT = QVariant.Int
 
 # Import relativo cuando se carga como parte del paquete del plugin (QGIS),
 # absoluto como fallback cuando se importa suelto desde un test que solo
@@ -142,7 +158,13 @@ class AnnotationManager:
             layer.dataProvider().addFeatures(nuevos)
 
         # Registrar en el proyecto QGIS y aplicar el estilo categorizado.
-        QgsProject.instance().addMapLayer(layer)
+        # Pasamos addToLegend=False y luego insertLayer(0, ...) para forzar
+        # que la capa de anotaciones quede ARRIBA del raster en el árbol de
+        # capas; si la dejamos al final, los polígonos quedan tapados por
+        # la imagen y se ven invisibles aunque existan en la tabla.
+        proyecto = QgsProject.instance()
+        proyecto.addMapLayer(layer, False)
+        proyecto.layerTreeRoot().insertLayer(0, layer)
 
         # TIGS 65: Archivo QML de respaldo
         exito = self._aplicar_estilo_por_estado(layer)  # Este es el estido definido en el código
@@ -174,15 +196,15 @@ class AnnotationManager:
         provider = molde.dataProvider()
         provider.addAttributes([
             # pending, approved o rejected
-            QgsField("status", QVariant.String),
+            QgsField("status", _FIELD_STRING),
             # 'human' (dibujado por el usuario) o 'ml' (importado del modelo)
-            QgsField("origin", QVariant.String),
+            QgsField("origin", _FIELD_STRING),
             # Fecha y hora del último cambio (ISO 8601 UTC).
-            QgsField("timestamp", QVariant.String),
+            QgsField("timestamp", _FIELD_STRING),
             # Score de confianza (solo aplica para origin='ml'; humano = NULL).
-            QgsField("score", QVariant.Double),
+            QgsField("score", _FIELD_DOUBLE),
             # Notas del arqueólogo asociadas a este polígono
-            QgsField("notas", QVariant.String),
+            QgsField("notas", _FIELD_STRING),
         ])
         molde.updateFields()
 
@@ -328,8 +350,13 @@ class AnnotationManager:
         feature = self.layer.getFeature(feature_id)
         if not feature.isValid():
             return ""
-        notas = feature.attribute("notas")         # El campo puede ser NULL si nunca se guardaron notas
-        return notas if notas is not None else ""
+        notas = feature.attribute("notas")
+        # OJO: el provider OGR/GPKG devuelve NULL (un QVariant especial),
+        # no Python None, cuando el campo está vacío. Hay que cubrir ambos
+        # casos antes de pasar el valor a setText() del QLineEdit/QTextEdit.
+        if notas is None or notas == NULL:
+            return ""
+        return str(notas)
 
     # ── Estilo visual ──────────────────────────────────────────────────────
 
