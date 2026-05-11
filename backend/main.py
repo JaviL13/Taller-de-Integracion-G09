@@ -125,6 +125,7 @@ class InferResponse(BaseModel):
     confidence: float
     width: int
     height: int
+    processing_time_ms: float
 
 
 @app.post("/infer", response_model=InferResponse)
