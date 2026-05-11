@@ -66,9 +66,7 @@ def _fit_stretch_params(
     if X_sample.ndim != 2 or X_sample.shape[-1] != 3:
         raise ValueError("X_sample debe tener forma (N, 3).")
     if X_sample.shape[0] < 16:
-        raise RuntimeError(
-            "Muy pocos pixeles válidos para estimar la estadística de la imagen."
-        )
+        raise RuntimeError("Muy pocos pixeles válidos para estimar la estadística de la imagen.")
     if regularization < 0.0 or regularization > 1.0:
         raise ValueError("regularization debe estar entre 0 y 1.")
 
@@ -103,14 +101,8 @@ def _fit_stretch_params(
     # globales se estiman correctamente desde aquí.
     X_sample_out = (X_sample - mu) @ M + mu
     if saturation_pct > 0:
-        low = np.percentile(
-            X_sample_out,
-            saturation_pct,
-            axis=0).astype(
-            np.float32)
-        high = np.percentile(
-            X_sample_out, 100.0 - saturation_pct, axis=0
-        ).astype(np.float32)
+        low = np.percentile(X_sample_out, saturation_pct, axis=0).astype(np.float32)
+        high = np.percentile(X_sample_out, 100.0 - saturation_pct, axis=0).astype(np.float32)
     else:
         low = np.array([0.0, 0.0, 0.0], dtype=np.float32)
         high = np.array([255.0, 255.0, 255.0], dtype=np.float32)
@@ -201,9 +193,7 @@ def _decorrelation_stretch_array(
         saturation_pct=saturation_pct,
         regularization=regularization,
     )
-    out = _apply_stretch_params(
-        img, params, nodata_mask=nodata_mask, saturation_pct=saturation_pct
-    )
+    out = _apply_stretch_params(img, params, nodata_mask=nodata_mask, saturation_pct=saturation_pct)
 
     stats = {
         "mean": params["mu"].tolist(),
@@ -250,15 +240,12 @@ def _bilateral_filter_numpy(
     offsets = np.arange(-radius, radius + 1)
     dy, dx = np.meshgrid(offsets, offsets, indexing="ij")
     spatial_weights = np.exp(
-        -(dx.astype(np.float32) ** 2 + dy.astype(np.float32) ** 2)
-        / (2.0 * float(sigma_space) ** 2)
+        -(dx.astype(np.float32) ** 2 + dy.astype(np.float32) ** 2) / (2.0 * float(sigma_space) ** 2)
     )
 
     # Paddeamos con reflection para que los píxeles del borde no se "caigan"
     # hacia negro — si no, el filtro oscurecería la frontera de la imagen.
-    padded = np.pad(
-        img, ((radius, radius), (radius, radius), (0, 0)), mode="reflect"
-    )
+    padded = np.pad(img, ((radius, radius), (radius, radius), (0, 0)), mode="reflect")
 
     # Acumuladores: numerador (Σ w · I_vecino) y denominador (Σ w).
     num = np.zeros_like(img)
@@ -272,13 +259,12 @@ def _bilateral_filter_numpy(
     # esa dirección. Así el loop interno es O(H·W·3), no O(H·W·d²·3).
     for i in range(d):
         for j in range(d):
-            shifted = padded[i: i + H, j: j + W, :]
+            shifted = padded[i : i + H, j : j + W, :]
             diff = shifted - img
             # Suma del cuadrado sobre los 3 canales → distancia de color
             # euclidiana al cuadrado; keepdims para que broadcast con la
             # imagen funcione sin problemas.
-            range_weight = np.exp(-np.sum(diff * diff,
-                                          axis=2, keepdims=True) / two_sigma_color_sq)
+            range_weight = np.exp(-np.sum(diff * diff, axis=2, keepdims=True) / two_sigma_color_sq)
             w = spatial_weights[i, j] * range_weight
             num += shifted * w
             den += w
@@ -317,6 +303,7 @@ def _apply_bilateral_filter(
     """
     try:
         import cv2
+
         # cv2.bilateralFilter espera uint8 o float32; soporta multicanal.
         return cv2.bilateralFilter(
             img_uint8,
@@ -326,9 +313,7 @@ def _apply_bilateral_filter(
         )
     except ImportError:
         # Fallback en numpy. Más lento pero sin dependencias extra.
-        return _bilateral_filter_numpy(
-            img_uint8, d=d, sigma_color=sigma_color, sigma_space=sigma_space
-        )
+        return _bilateral_filter_numpy(img_uint8, d=d, sigma_color=sigma_color, sigma_space=sigma_space)
 
 
 def _read_thumbnail_sample(
@@ -363,9 +348,9 @@ def _read_thumbnail_sample(
     nodata_masks = []
     for bi in band_indices:
         band = ds.GetRasterBand(bi)
-        arr = band.ReadAsArray(
-            xoff, yoff, xsize, ysize, buf_xsize=buf_w, buf_ysize=buf_h
-        ).astype(np.float32, copy=False)
+        arr = band.ReadAsArray(xoff, yoff, xsize, ysize, buf_xsize=buf_w, buf_ysize=buf_h).astype(
+            np.float32, copy=False
+        )
         nodata = band.GetNoDataValue()
         if nodata is not None:
             mask = arr == nodata
@@ -452,9 +437,7 @@ def _process_tiled(
             channels = []
             masks = []
             for bi_idx, b in enumerate(in_bands):
-                arr = b.ReadAsArray(read_x, read_y, read_w, read_h).astype(
-                    np.float32, copy=False
-                )
+                arr = b.ReadAsArray(read_x, read_y, read_w, read_h).astype(np.float32, copy=False)
                 nd = nodata_values[bi_idx]
                 if nd is not None:
                     masks.append(arr == nd)
@@ -487,8 +470,8 @@ def _process_tiled(
 
             # 3. Recortar el halo y escribir sólo el centro (tile "real").
             out_tile = out_padded[
-                top_halo: top_halo + th,
-                left_halo: left_halo + tw,
+                top_halo : top_halo + th,
+                left_halo : left_halo + tw,
                 :,
             ]
 
@@ -584,8 +567,7 @@ def decorrelation_stretch(
 
     band_indices = tuple(int(b) for b in band_indices)
     if len(band_indices) != 3:
-        raise ValueError(
-            "Se requieren exactamente 3 bandas para decorrelation stretch.")
+        raise ValueError("Se requieren exactamente 3 bandas para decorrelation stretch.")
     if saturation_pct < 0 or saturation_pct > 10:
         raise ValueError("saturation_pct debe estar entre 0 y 10.")
     if tile_size < 64:
@@ -601,9 +583,7 @@ def decorrelation_stretch(
 
     for b in band_indices:
         if b < 1 or b > n_bands:
-            raise ValueError(
-                f"Banda {b} fuera de rango — el raster tiene {n_bands} bandas."
-            )
+            raise ValueError(f"Banda {b} fuera de rango — el raster tiene {n_bands} bandas.")
 
     # Resolver la ventana de lectura -----------------------------------------
     if window is None:
@@ -631,11 +611,7 @@ def decorrelation_stretch(
         height,
         3,
         gdal.GDT_Byte,
-        options=[
-            "COMPRESS=DEFLATE",
-            "TILED=YES",
-            "PREDICTOR=2",
-            "BIGTIFF=IF_SAFER"],
+        options=["COMPRESS=DEFLATE", "TILED=YES", "PREDICTOR=2", "BIGTIFF=IF_SAFER"],
     )
     if dst_ds is None:
         raise RuntimeError(f"No se pudo crear el raster de salida: {dst_path}")
@@ -668,9 +644,7 @@ def decorrelation_stretch(
     if use_tiled:
         # PASADA 1 — estimar parámetros desde un thumbnail decimado de toda
         # la región. Memoria acotada (~sample_limit píxeles).
-        thumb, thumb_mask = _read_thumbnail_sample(
-            ds, band_indices, xoff, yoff, xsize, ysize, sample_limit
-        )
+        thumb, thumb_mask = _read_thumbnail_sample(ds, band_indices, xoff, yoff, xsize, ysize, sample_limit)
         X_all = thumb.reshape(-1, 3)
         valid_flat = ~thumb_mask.reshape(-1)
         X_sample = X_all[valid_flat]
@@ -708,13 +682,9 @@ def decorrelation_stretch(
         nodata_masks = []
         for bi in band_indices:
             band = ds.GetRasterBand(bi)
-            arr = band.ReadAsArray(xoff, yoff, xsize, ysize).astype(
-                np.float32, copy=False
-            )
+            arr = band.ReadAsArray(xoff, yoff, xsize, ysize).astype(np.float32, copy=False)
             nodata = band.GetNoDataValue()
-            mask = (
-                arr == nodata) if nodata is not None else np.zeros_like(
-                arr, dtype=bool)
+            mask = (arr == nodata) if nodata is not None else np.zeros_like(arr, dtype=bool)
             bands_arr.append(arr)
             nodata_masks.append(mask)
 
@@ -727,10 +697,7 @@ def decorrelation_stretch(
         X_valid = X[valid_flat]
         if X_valid.shape[0] > sample_limit:
             rng = np.random.default_rng(42)
-            idx = rng.choice(
-                X_valid.shape[0],
-                size=sample_limit,
-                replace=False)
+            idx = rng.choice(X_valid.shape[0], size=sample_limit, replace=False)
             X_sample = X_valid[idx]
         else:
             X_sample = X_valid
@@ -740,11 +707,7 @@ def decorrelation_stretch(
             regularization=regularization,
         )
 
-        out = _apply_stretch_params(
-            img,
-            params,
-            nodata_mask=combined_mask,
-            saturation_pct=saturation_pct)
+        out = _apply_stretch_params(img, params, nodata_mask=combined_mask, saturation_pct=saturation_pct)
 
         # Filtro bilateral opcional. En modo in-memory es trivial: filtramos
         # la salida completa y listo — no hay halos ni tiles. Después volvemos

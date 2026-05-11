@@ -17,16 +17,16 @@ from datetime import datetime, timezone
 
 from qgis.core import (
     NULL,
-    QgsVectorLayer,
-    QgsField,
+    QgsCategorizedSymbolRenderer,
+    QgsCoordinateTransformContext,
     QgsFeature,
+    QgsField,
     QgsGeometry,
     QgsProject,
-    QgsVectorFileWriter,
-    QgsCoordinateTransformContext,
-    QgsCategorizedSymbolRenderer,
     QgsRendererCategory,
     QgsSymbol,
+    QgsVectorFileWriter,
+    QgsVectorLayer,
     QgsWkbTypes,
 )
 from qgis.PyQt.QtCore import QVariant
@@ -37,6 +37,7 @@ from qgis.PyQt.QtGui import QColor
 # plugin se ejecuta en una versión vieja de QGIS donde QMetaType no existe.
 try:
     from qgis.PyQt.QtCore import QMetaType
+
     _FIELD_STRING = QMetaType.Type.QString
     _FIELD_DOUBLE = QMetaType.Type.Double
     _FIELD_INT = QMetaType.Type.Int
@@ -124,9 +125,7 @@ class AnnotationManager:
         uri = f"{self.gpkg_path}|layername={GPKG_TABLE}"
         layer = QgsVectorLayer(uri, GPKG_TABLE, "ogr")
         if not layer.isValid():
-            raise RuntimeError(
-                f"No se pudo abrir la capa '{GPKG_TABLE}' en {self.gpkg_path}"
-            )
+            raise RuntimeError(f"No se pudo abrir la capa '{GPKG_TABLE}' en {self.gpkg_path}")
 
         # 4. Migrar al GPKG los features rescatados de capas memory obsoletas.
         if features_a_migrar:
@@ -144,9 +143,7 @@ class AnnotationManager:
                 )
                 nuevo.setAttribute(
                     "origin",
-                    feat_viejo.attribute("origin")
-                    if "origin" in feat_viejo.fields().names()
-                    else "human",
+                    feat_viejo.attribute("origin") if "origin" in feat_viejo.fields().names() else "human",
                 )
                 nuevo.setAttribute(
                     "timestamp",
@@ -170,9 +167,9 @@ class AnnotationManager:
         exito = self._aplicar_estilo_por_estado(layer)  # Este es el estido definido en el código
         qml_path = os.path.join(os.path.dirname(__file__), "annotations_style.qml")  # Este es el QML de respaldo
 
-        if exito:                        # Si el estilo del código se aplica bien
-            layer.triggerRepaint()       # Lo usa
-        else:                            # Si no se aplica, carga el QML de respaldo
+        if exito:  # Si el estilo del código se aplica bien
+            layer.triggerRepaint()  # Lo usa
+        else:  # Si no se aplica, carga el QML de respaldo
             if os.path.exists(qml_path):
                 mensaje, exito_qml = layer.loadNamedStyle(qml_path)
                 if exito_qml:
@@ -194,18 +191,20 @@ class AnnotationManager:
             "memory",
         )
         provider = molde.dataProvider()
-        provider.addAttributes([
-            # pending, approved o rejected
-            QgsField("status", _FIELD_STRING),
-            # 'human' (dibujado por el usuario) o 'ml' (importado del modelo)
-            QgsField("origin", _FIELD_STRING),
-            # Fecha y hora del último cambio (ISO 8601 UTC).
-            QgsField("timestamp", _FIELD_STRING),
-            # Score de confianza (solo aplica para origin='ml'; humano = NULL).
-            QgsField("score", _FIELD_DOUBLE),
-            # Notas del arqueólogo asociadas a este polígono
-            QgsField("notas", _FIELD_STRING),
-        ])
+        provider.addAttributes(
+            [
+                # pending, approved o rejected
+                QgsField("status", _FIELD_STRING),
+                # 'human' (dibujado por el usuario) o 'ml' (importado del modelo)
+                QgsField("origin", _FIELD_STRING),
+                # Fecha y hora del último cambio (ISO 8601 UTC).
+                QgsField("timestamp", _FIELD_STRING),
+                # Score de confianza (solo aplica para origin='ml'; humano = NULL).
+                QgsField("score", _FIELD_DOUBLE),
+                # Notas del arqueólogo asociadas a este polígono
+                QgsField("notas", _FIELD_STRING),
+            ]
+        )
         molde.updateFields()
 
         # Escribir la capa vacía al .gpkg. Como el archivo no existe,
@@ -255,9 +254,7 @@ class AnnotationManager:
         feature.setAttribute("status", AnnotationState.PENDING.value)
         feature.setAttribute("origin", origin)
         feature.setAttribute("score", score)
-        feature.setAttribute(
-            "timestamp", datetime.now(timezone.utc).isoformat()
-        )
+        feature.setAttribute("timestamp", datetime.now(timezone.utc).isoformat())
 
         # addFeatures devuelve (ok, features_agregados); la 2ª contiene los
         # features con el fid ya asignado por el provider.
@@ -314,12 +311,14 @@ class AnnotationManager:
         idx_timestamp = self.layer.fields().indexFromName("timestamp")
         nuevo_ts = datetime.now(timezone.utc).isoformat()
 
-        ok = self.layer.dataProvider().changeAttributeValues({
-            feature_id: {
-                idx_status: nuevo_estado.value,
-                idx_timestamp: nuevo_ts,
+        ok = self.layer.dataProvider().changeAttributeValues(
+            {
+                feature_id: {
+                    idx_status: nuevo_estado.value,
+                    idx_timestamp: nuevo_ts,
+                }
             }
-        })
+        )
         if not ok:
             return False
 
@@ -336,11 +335,13 @@ class AnnotationManager:
             return False
 
         idx_notas = self.layer.fields().indexFromName("notas")
-        ok = self.layer.dataProvider().changeAttributeValues({
-            feature_id: {
-                idx_notas: notas,
+        ok = self.layer.dataProvider().changeAttributeValues(
+            {
+                feature_id: {
+                    idx_notas: notas,
+                }
             }
-        })
+        )
         if ok:
             self.layer.triggerRepaint()
         return ok
@@ -361,7 +362,6 @@ class AnnotationManager:
     # ── Estilo visual ──────────────────────────────────────────────────────
 
     def aplicar_estilo_por_estado(self):
-
         """API pública para refrescar el estilo categorizado.
 
         Se puede llamar desde fuera (p.ej. desde el panel) para forzar un
@@ -382,9 +382,7 @@ class AnnotationManager:
             r, g, b, a = color_for_state(estado)
             simbolo = QgsSymbol.defaultSymbol(QgsWkbTypes.PolygonGeometry)
             simbolo.setColor(QColor(r, g, b, a))
-            categorias.append(
-                QgsRendererCategory(estado.value, simbolo, estado.value)
-            )
+            categorias.append(QgsRendererCategory(estado.value, simbolo, estado.value))
 
         renderer = QgsCategorizedSymbolRenderer("status", categorias)
         layer.setRenderer(renderer)

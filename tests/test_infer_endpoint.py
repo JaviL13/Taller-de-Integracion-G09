@@ -26,7 +26,6 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Setup de imports
 # ---------------------------------------------------------------------------
@@ -56,6 +55,7 @@ with patch("sam_wrapper.initialize_sam"):
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def client():
     """Cliente HTTP en proceso contra la app FastAPI."""
@@ -76,9 +76,10 @@ def synthetic_image_png():
 
     # Convertir a PIL Image y guardar como PNG
     from PIL import Image
-    img = Image.fromarray(image_array, mode='RGB')
+
+    img = Image.fromarray(image_array, mode="RGB")
     png_bytes = io.BytesIO()
-    img.save(png_bytes, format='PNG')
+    img.save(png_bytes, format="PNG")
     png_bytes.seek(0)
     return png_bytes.getvalue()
 
@@ -103,6 +104,7 @@ def synthetic_mask_and_confidence():
 # ---------------------------------------------------------------------------
 # Tests para TIGS-70
 # ---------------------------------------------------------------------------
+
 
 def test_health(client):
     """GET /health retorna 200 y {"status": "ok"}."""
@@ -166,8 +168,9 @@ def test_infer_returns_mask(client, synthetic_image_png, synthetic_mask_and_conf
             mask_bytes = base64.b64decode(mask_b64)
             # Intentar abrir como imagen para verificar que es PNG válido
             from PIL import Image
+
             decoded_mask = Image.open(io.BytesIO(mask_bytes))
-            assert decoded_mask.format == 'PNG'
+            assert decoded_mask.format == "PNG"
             # Convertir a array para validar que tiene forma correcta
             mask_array = np.array(decoded_mask)
             assert mask_array.shape == (256, 256)  # Grayscale
