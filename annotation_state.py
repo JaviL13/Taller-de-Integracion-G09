@@ -29,6 +29,7 @@ class AnnotationState(str, Enum):
     sea True; eso simplifica el interop con QGIS (que devuelve strings al
     leer el campo del feature) y con el .gpkg.
     """
+
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
@@ -36,6 +37,7 @@ class AnnotationState(str, Enum):
 
 class StateTransitionError(ValueError):
     """La transición de estado solicitada no está permitida."""
+
     pass
 
 
@@ -67,9 +69,9 @@ _TRANSICIONES_VALIDAS = {
 # debajo del polígono. Esquema flat-UI con buen contraste sobre fondo
 # oscuro (típico de imágenes satelitales de Atacama).
 _COLORES = {
-    AnnotationState.PENDING:  (243, 156, 18, 100),   # naranja — necesita revisión
-    AnnotationState.APPROVED: (39, 174, 96, 100),    # verde — confirmado
-    AnnotationState.REJECTED: (231, 76, 60, 100),    # rojo — descartado
+    AnnotationState.PENDING: (243, 156, 18, 100),  # naranja — necesita revisión
+    AnnotationState.APPROVED: (39, 174, 96, 100),  # verde — confirmado
+    AnnotationState.REJECTED: (231, 76, 60, 100),  # rojo — descartado
 }
 
 
@@ -85,9 +87,7 @@ def parse_state(value) -> AnnotationState:
         return AnnotationState(value)
     except ValueError as e:
         validos = [s.value for s in AnnotationState]
-        raise ValueError(
-            f"Estado inválido: {value!r}. Estados válidos: {validos}"
-        ) from e
+        raise ValueError(f"Estado inválido: {value!r}. Estados válidos: {validos}") from e
 
 
 def validate_transition(origen, destino) -> None:
@@ -99,9 +99,7 @@ def validate_transition(origen, destino) -> None:
     origen = parse_state(origen)
     destino = parse_state(destino)
     if destino not in _TRANSICIONES_VALIDAS[origen]:
-        raise StateTransitionError(
-            f"Transición no permitida: {origen.value} → {destino.value}"
-        )
+        raise StateTransitionError(f"Transición no permitida: {origen.value} → {destino.value}")
 
 
 def color_for_state(state) -> tuple:

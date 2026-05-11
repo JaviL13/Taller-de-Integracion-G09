@@ -1,4 +1,4 @@
-'''algoritmo decorrelation stretch
+"""algoritmo decorrelation stretch
 igual, la TIGS-38 lo reutiliza directo.
 El algoritmo es un poco más complejo: toma 3 bandas,
 las centra, calcula la matriz de covarianza, obtiene los
@@ -6,7 +6,7 @@ eigenvalores y eigenvectores, proyecta los datos en el espacio PCA,
 estira cada componente usando percentiles 2-98, y luego proyecta de vuelta
 al espacio original.
 La función decorrelation_stretch retorna un array RGB uint8 listo
-para guardar como PNG o mostrar en QGIS.'''
+para guardar como PNG o mostrar en QGIS."""
 
 import numpy as np
 
@@ -16,10 +16,7 @@ def decorrelation_stretch(data, band_indices=(1, 2, 3)):
     Decorrelation stretch sobre 3 bandas usando PCA.
     Retorna imagen RGB como array uint8.
     """
-    bands = np.stack([
-        data[i - 1].astype(np.float32)
-        for i in band_indices
-    ], axis=-1)
+    bands = np.stack([data[i - 1].astype(np.float32) for i in band_indices], axis=-1)
 
     H, W, _ = bands.shape
     pixels = bands.reshape(-1, 3)
@@ -37,8 +34,7 @@ def decorrelation_stretch(data, band_indices=(1, 2, 3)):
     stretched = np.zeros_like(projected)
     for i in range(3):
         p2, p98 = np.percentile(projected[:, i], [2, 98])
-        stretched[:, i] = np.clip(
-            (projected[:, i] - p2) / (p98 - p2 + 1e-8), 0, 1)
+        stretched[:, i] = np.clip((projected[:, i] - p2) / (p98 - p2 + 1e-8), 0, 1)
 
     result_valid = stretched @ eigenvectors.T + mean
     result = np.zeros((H * W, 3), dtype=np.float32)

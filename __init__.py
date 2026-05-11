@@ -33,4 +33,5 @@ def classFactory(iface):  # pylint: disable=invalid-name
     """
     #
     from .geoglyph import GeoGlyph
+
     return GeoGlyph(iface)

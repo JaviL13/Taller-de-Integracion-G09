@@ -21,15 +21,15 @@ import tempfile
 import time
 import traceback
 
-from qgis.PyQt import QtWidgets
-from qgis.PyQt.QtCore import Qt
 from qgis.core import (
+    QgsCoordinateTransform,
+    QgsMapLayerProxyModel,
     QgsProject,
     QgsRasterLayer,
-    QgsMapLayerProxyModel,
-    QgsCoordinateTransform,
 )
 from qgis.gui import QgsMapLayerComboBox
+from qgis.PyQt import QtWidgets
+from qgis.PyQt.QtCore import Qt
 
 from .decorrelation_stretch import decorrelation_stretch
 
@@ -53,8 +53,7 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
         self.layer_combo.setFilters(QgsMapLayerProxyModel.RasterLayer)
         layer_layout.addWidget(self.layer_combo)
 
-        self.btn_abrir_tiff = QtWidgets.QPushButton(
-            "… o abrir GeoTIFF desde disco")
+        self.btn_abrir_tiff = QtWidgets.QPushButton("… o abrir GeoTIFF desde disco")
         self.btn_abrir_tiff.clicked.connect(self._open_geotiff)
         layer_layout.addWidget(self.btn_abrir_tiff)
 
@@ -80,13 +79,13 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
         extent_layout = QtWidgets.QVBoxLayout(extent_group)
         self.extent_combo = QtWidgets.QComboBox()
         self.extent_combo.addItem("Vista actual del mapa (rápido)", "canvas")
-        self.extent_combo.addItem(
-            "Raster completo (procesamiento por tiles)", "full")
+        self.extent_combo.addItem("Raster completo (procesamiento por tiles)", "full")
         self.extent_combo.setToolTip(
             "«Vista actual» procesa sólo la región visible en el lienzo de QGIS — "
             "ideal para iteración rápida.\n"
             "«Raster completo» procesa toda la imagen en teselas; la memoria "
-            "queda acotada, así que funciona sobre ortomosaicos grandes.")
+            "queda acotada, así que funciona sobre ortomosaicos grandes."
+        )
         extent_layout.addWidget(self.extent_combo)
         self.extent_info_lbl = QtWidgets.QLabel("")
         self.extent_info_lbl.setStyleSheet("color: #666; font-size: 11px;")
@@ -177,9 +176,7 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
         outer.addWidget(self.progress)
 
         # ---- Botones -------------------------------------------------------
-        buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
-        )
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
         buttons.button(QtWidgets.QDialogButtonBox.Ok).setText("Aplicar")
         buttons.accepted.connect(self._run_stretch)
         buttons.rejected.connect(self.reject)
@@ -209,9 +206,7 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
         canvas_crs = canvas.mapSettings().destinationCrs()
         layer_crs = layer.crs()
         if canvas_crs != layer_crs:
-            xform = QgsCoordinateTransform(
-                canvas_crs, layer_crs, QgsProject.instance()
-            )
+            xform = QgsCoordinateTransform(canvas_crs, layer_crs, QgsProject.instance())
             map_extent = xform.transformBoundingBox(map_extent)
 
         layer_extent = layer.extent()
@@ -219,7 +214,8 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
         if inter.isEmpty():
             raise RuntimeError(
                 "La vista del mapa no se superpone con la extensión del raster. "
-                "Centra el mapa sobre la imagen antes de aplicar.")
+                "Centra el mapa sobre la imagen antes de aplicar."
+            )
 
         raster_w = layer.width()
         raster_h = layer.height()
@@ -284,17 +280,13 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
             combo.blockSignals(False)
 
     def _open_geotiff(self):
-        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Seleccionar GeoTIFF", "", "GeoTIFF (*.tif *.tiff)"
-        )
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Seleccionar GeoTIFF", "", "GeoTIFF (*.tif *.tiff)")
         if not file_path:
             return
         layer_name = os.path.splitext(os.path.basename(file_path))[0]
         layer = QgsRasterLayer(file_path, layer_name)
         if not layer.isValid():
-            QtWidgets.QMessageBox.critical(
-                self, "Error", f"No se pudo cargar el archivo:\n{file_path}"
-            )
+            QtWidgets.QMessageBox.critical(self, "Error", f"No se pudo cargar el archivo:\n{file_path}")
             return
         QgsProject.instance().addMapLayer(layer)
         self.iface.setActiveLayer(layer)
@@ -304,9 +296,7 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
         self.layer_combo.setLayer(layer)
 
     def _browse_output(self):
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Guardar resultado", "", "GeoTIFF (*.tif *.tiff)"
-        )
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Guardar resultado", "", "GeoTIFF (*.tif *.tiff)")
         if path:
             if not path.lower().endswith((".tif", ".tiff")):
                 path += ".tif"
@@ -317,29 +307,22 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
     def _run_stretch(self):
         layer = self.layer_combo.currentLayer()
         if layer is None or not isinstance(layer, QgsRasterLayer):
-            QtWidgets.QMessageBox.warning(
-                self, "Falta capa", "Selecciona una capa raster de entrada."
-            )
+            QtWidgets.QMessageBox.warning(self, "Falta capa", "Selecciona una capa raster de entrada.")
             return
 
         src = layer.source()
         # Extrae índices 1-indexados desde el texto "N: nombre"
         try:
-            band_indices = tuple(
-                int(c.currentText().split(":", 1)[0]) for c in self.band_combos
-            )
+            band_indices = tuple(int(c.currentText().split(":", 1)[0]) for c in self.band_combos)
         except ValueError:
-            QtWidgets.QMessageBox.critical(
-                self, "Error", "No se pudieron leer los índices de banda."
-            )
+            QtWidgets.QMessageBox.critical(self, "Error", "No se pudieron leer los índices de banda.")
             return
 
         if len(set(band_indices)) < 3:
             resp = QtWidgets.QMessageBox.question(
                 self,
                 "Bandas repetidas",
-                "Seleccionaste bandas repetidas. El PCA será degenerado.\n"
-                "¿Deseas continuar de todas formas?",
+                "Seleccionaste bandas repetidas. El PCA será degenerado.\n¿Deseas continuar de todas formas?",
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                 QtWidgets.QMessageBox.No,
             )
@@ -355,8 +338,7 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
 
         out = self.out_edit.text().strip()
         if not out:
-            fd, out = tempfile.mkstemp(
-                suffix="_dstretch.tif", prefix="geoglyph_")
+            fd, out = tempfile.mkstemp(suffix="_dstretch.tif", prefix="geoglyph_")
             os.close(fd)
         else:
             # Si el usuario escribió solo un nombre (sin ruta), GDAL trata el
@@ -383,8 +365,7 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
                 return
 
         # UI en modo "procesando"
-        self.status_lbl.setText(
-            "Procesando… (esto puede tardar unos segundos)")
+        self.status_lbl.setText("Procesando… (esto puede tardar unos segundos)")
         self.progress.setValue(0)
         self.progress.setVisible(True)
         self.setCursor(Qt.WaitCursor)
@@ -395,17 +376,13 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
             # dejamos que Qt procese eventos para que la UI no se congele.
             pct = int(100 * done / max(total, 1))
             self.progress.setValue(pct)
-            self.status_lbl.setText(
-                f"Procesando tile {done}/{total} ({pct}%)…"
-            )
+            self.status_lbl.setText(f"Procesando tile {done}/{total} ({pct}%)…")
             QtWidgets.QApplication.processEvents()
 
         # Parámetros de reducción de ruido. El spin está en porcentaje (0–5)
         # y la API espera fracción (0–1), así que dividimos por 100.
         regularization = float(self.reg_spin.value()) / 100.0
-        bilateral_d, bilateral_sigma_color, bilateral_sigma_space = (
-            self.bilateral_combo.currentData()
-        )
+        bilateral_d, bilateral_sigma_color, bilateral_sigma_space = self.bilateral_combo.currentData()
 
         t0 = time.perf_counter()
         try:
@@ -450,10 +427,7 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
             return
         QgsProject.instance().addMapLayer(new_layer)
 
-        self.status_lbl.setText(
-            f"Listo: «{layer_name}» ({elapsed:.2f} s, "
-            f"{info['shape'][0]}×{info['shape'][1]} px)"
-        )
+        self.status_lbl.setText(f"Listo: «{layer_name}» ({elapsed:.2f} s, {info['shape'][0]}×{info['shape'][1]} px)")
         self.iface.messageBar().pushSuccess(
             "GeoGlyph",
             f"Decorrelation stretch aplicado en {elapsed:.2f} s — capa: {layer_name}",
