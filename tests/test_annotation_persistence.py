@@ -209,10 +209,8 @@ def test_features_persisten_entre_managers(
     mgr_a = annotation_manager.AnnotationManager(gpkg_path, crs)
     f1 = mgr_a.agregar_anotacion(_polygon_dummy())
     f2 = mgr_a.agregar_anotacion(_polygon_dummy())
-    f3 = mgr_a.agregar_anotacion(_polygon_dummy())
     mgr_a.aprobar_anotacion(f1.id())
     mgr_a.rechazar_anotacion(f2.id())
-    # f3 queda pending
 
     # Limpiar el proyecto para forzar a que mgr_b cargue la capa de cero.
     QgsProject.instance().clear()

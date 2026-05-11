@@ -594,7 +594,7 @@ class GeoGlyph:
         # o la capa no es válida, el helper levanta ValueError → se avisa
         # al usuario y se aborta.
         try:
-            crop_info = extract_raster_crop(layer, rect)
+            extract_raster_crop(layer, rect)
         except ValueError as e:
             self.iface.messageBar().pushMessage(
                 "GeoGlyph", str(e), level=1, duration=4
