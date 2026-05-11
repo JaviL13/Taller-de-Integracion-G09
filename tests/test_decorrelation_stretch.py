@@ -233,9 +233,9 @@ def test_bilateral_numpy_reduces_noise_in_flat_region():
     var_after = filtered.astype(np.float32).var(axis=(0, 1)).mean()
     # Con kernel d=7 y sigma_color=25 (>> σ del ruido), esperamos reducción
     # de al menos 50 % en zonas uniformes.
-    assert (
-        var_after < var_before * 0.5
-    ), f"Bilateral no suavizó suficiente: antes={var_before:.1f}, después={var_after:.1f}"
+    assert var_after < var_before * 0.5, (
+        f"Bilateral no suavizó suficiente: antes={var_before:.1f}, después={var_after:.1f}"
+    )
 
 
 def test_bilateral_numpy_preserves_edges():
