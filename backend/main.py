@@ -138,7 +138,7 @@ async def infer(
         labels: JSON string con array de labels [1, 1, ...] o None
                 Si no se pasa, todos los puntos son foreground (1)
     """
-    inicio = time.time()
+    # inicio = time.time()
 
     # 1. Leer imagen del upload
     image_data = await image.read()
