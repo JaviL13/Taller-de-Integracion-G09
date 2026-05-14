@@ -11,12 +11,13 @@
 # GPKG-backed (provider 'ogr') para que los cambios sobrevivan al cierre
 # de QGIS y para no sobreescribir el archivo en cada guardado.
 
-
+import json
 import os
 from datetime import datetime, timezone
 
 # Para exportar anotaciones como GeoJson
-import json
+from qgis.PyQt.QtCore import QVariant
+from qgis.PyQt.QtGui import QColor
 from qgis.PyQt.QtWidgets import QFileDialog
 
 from qgis.core import (
@@ -33,8 +34,6 @@ from qgis.core import (
     QgsVectorLayer,
     QgsWkbTypes,
 )
-from qgis.PyQt.QtCore import QVariant
-from qgis.PyQt.QtGui import QColor
 
 # Compatibilidad QGIS 3.38+: el constructor de QgsField con QVariant.Type
 # quedó deprecado y prefiere QMetaType.Type. Hacemos fallback por si el
