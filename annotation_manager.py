@@ -15,11 +15,6 @@ import json
 import os
 from datetime import datetime, timezone
 
-# Para exportar anotaciones como GeoJson
-from qgis.PyQt.QtCore import QVariant
-from qgis.PyQt.QtGui import QColor
-from qgis.PyQt.QtWidgets import QFileDialog
-
 from qgis.core import (
     NULL,
     QgsCategorizedSymbolRenderer,
@@ -34,6 +29,11 @@ from qgis.core import (
     QgsVectorLayer,
     QgsWkbTypes,
 )
+
+# Para exportar anotaciones como GeoJson
+from qgis.PyQt.QtCore import QVariant
+from qgis.PyQt.QtGui import QColor
+from qgis.PyQt.QtWidgets import QFileDialog
 
 # Compatibilidad QGIS 3.38+: el constructor de QgsField con QVariant.Type
 # quedó deprecado y prefiere QMetaType.Type. Hacemos fallback por si el
