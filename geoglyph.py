@@ -218,7 +218,7 @@ class GeoGlyph:
     def cargar_bandas(self):  # Número de bandas que tiene una capa
         if self.panel is None:
             return
-        
+
         layers = self.iface.layerTreeView().selectedLayers()  # capa seleccionada
 
         if not layers:
@@ -688,9 +688,7 @@ class GeoGlyph:
         # Inicializar manager si aún no existe
         manager = self._get_or_create_annotation_manager()
 
-        ruta = manager.exportar_anotaciones_geojson(
-            self.iface.mainWindow()
-        )
+        ruta = manager.exportar_anotaciones_geojson(self.iface.mainWindow())
 
         if ruta:
             self.iface.messageBar().pushSuccess(

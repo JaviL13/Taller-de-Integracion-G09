@@ -435,28 +435,11 @@ class AnnotationManager:
                     "type": "Feature",
                     "geometry": geom_json,
                     "properties": {
-                        "origin": (
-                            None
-                            if feature.attribute("origin") == NULL
-                            else str(feature.attribute("origin"))
-                        ),
-
-                        "notas": (
-                            None
-                            if feature.attribute("notas") == NULL
-                            else str(feature.attribute("notas"))
-                        ),
-
-                        "score": (
-                            None
-                            if feature.attribute("score") == NULL
-                            else float(feature.attribute("score"))
-                        ),
-
+                        "origin": (None if feature.attribute("origin") == NULL else str(feature.attribute("origin"))),
+                        "notas": (None if feature.attribute("notas") == NULL else str(feature.attribute("notas"))),
+                        "score": (None if feature.attribute("score") == NULL else float(feature.attribute("score"))),
                         "timestamp": (
-                            None
-                            if feature.attribute("timestamp") == NULL
-                            else str(feature.attribute("timestamp"))
+                            None if feature.attribute("timestamp") == NULL else str(feature.attribute("timestamp"))
                         ),
                     },
                 }
