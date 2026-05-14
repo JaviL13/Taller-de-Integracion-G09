@@ -133,6 +133,9 @@ class GeoGlyph:
         self.panel.btn_aprobar.clicked.connect(self._aprobar_seleccion)
         self.panel.btn_rechazar.clicked.connect(self._rechazar_seleccion)
 
+        # Botón para exportar anotaciones
+        self.panel.btn_exportar_geojson.clicked.connect(self.exportar_anotaciones_geojson)
+
         # NOTA: ya no se auto-inicializa el AnnotationManager al cargar el
         # plugin. Antes se hacía acá y eso provocaba que las anotaciones
         # vivieran en un GPKG fijo dentro de la carpeta del plugin, que se
@@ -213,6 +216,9 @@ class GeoGlyph:
             self.abrir_decorrelation_stretch()
 
     def cargar_bandas(self):  # Número de bandas que tiene una capa
+        if self.panel is None:
+            return
+        
         layers = self.iface.layerTreeView().selectedLayers()  # capa seleccionada
 
         if not layers:
@@ -677,6 +683,21 @@ class GeoGlyph:
         # Volver a la herramienta de navegación normal
         self.iface.mapCanvas().unsetMapTool(self._draw_tool)
 
+    # Exportar anotaciones aprobadas
+    def exportar_anotaciones_geojson(self):
+        # Inicializar manager si aún no existe
+        manager = self._get_or_create_annotation_manager()
+
+        ruta = manager.exportar_anotaciones_geojson(
+            self.iface.mainWindow()
+        )
+
+        if ruta:
+            self.iface.messageBar().pushSuccess(
+                "GeoGlyph",
+                f"Anotaciones exportadas a: {ruta}",
+            )
+
     # ── TIGS-53: Selección de ROI rectangular y envío a /infer ──────────────
 
     def _activar_herramienta_roi(self):
@@ -955,7 +976,11 @@ class GeoGlyph:
         argumentos (selected, deselected, clearAndSelect) que no nos importan
         — solo usamos la cuenta actual de features seleccionados.
         """
+        if self.panel is None:
+            return
         if self._annotation_manager is None:
+            return
+        if not hasattr(self.panel, "btn_aprobar"):
             return
 
         seleccionados = self._annotation_manager.layer.selectedFeatureCount()

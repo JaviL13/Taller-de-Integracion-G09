@@ -15,6 +15,10 @@
 import os
 from datetime import datetime, timezone
 
+# Para exportar anotaciones como GeoJson
+import json
+from qgis.PyQt.QtWidgets import QFileDialog
+
 from qgis.core import (
     NULL,
     QgsCategorizedSymbolRenderer,
@@ -387,3 +391,86 @@ class AnnotationManager:
         renderer = QgsCategorizedSymbolRenderer("status", categorias)
         layer.setRenderer(renderer)
         layer.triggerRepaint()
+
+    # ── Exportar ──────────────────────────────────────────────────────
+    def exportar_anotaciones_geojson(self, parent=None) -> str | None:
+        """Exporta todas las anotaciones con status='approved'
+        a un archivo GeoJSON estándar.
+
+        Cada feature incluye:
+            - geometría
+            - origin
+            - notas
+            - score
+            - timestamp"""
+
+        # 1. Pedir ruta destino al usuario
+        output_path, _ = QFileDialog.getSaveFileName(
+            parent,
+            "Exportar anotaciones",
+            "annotations.geojson",
+            "GeoJSON (*.geojson *.json)",
+        )
+
+        # Usuario canceló
+        if not output_path:
+            return None
+
+        # Asegurar extensión
+        if not output_path.endswith((".geojson", ".json")):
+            output_path += ".geojson"
+
+        # 2. Obtener solo annotations approved
+        approved_features = []
+
+        for feature in self.layer.getFeatures():
+            status = feature.attribute("status")
+
+            if status != AnnotationState.APPROVED.value:
+                continue
+
+            geom_json = json.loads(feature.geometry().asJson())
+
+            approved_features.append(
+                {
+                    "type": "Feature",
+                    "geometry": geom_json,
+                    "properties": {
+                        "origin": (
+                            None
+                            if feature.attribute("origin") == NULL
+                            else str(feature.attribute("origin"))
+                        ),
+
+                        "notas": (
+                            None
+                            if feature.attribute("notas") == NULL
+                            else str(feature.attribute("notas"))
+                        ),
+
+                        "score": (
+                            None
+                            if feature.attribute("score") == NULL
+                            else float(feature.attribute("score"))
+                        ),
+
+                        "timestamp": (
+                            None
+                            if feature.attribute("timestamp") == NULL
+                            else str(feature.attribute("timestamp"))
+                        ),
+                    },
+                }
+            )
+
+        # 3. Construir FeatureCollection GeoJSON
+        geojson = {
+            "type": "FeatureCollection",
+            "features": approved_features,
+        }
+
+        # 4. Guardar archivo
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(geojson, f, ensure_ascii=False, indent=2)
+
+        return output_path
