@@ -364,3 +364,9 @@ pytest tests/test_tigs35.py -v --cov=. --cov-report=term-missing
 
 ### **Pantalla 4 — Estado final**
 ![Imagen 4](data/wireframes/Imagen4.png)
+
+
+## Guía de uso
+
+Para instrucciones detalladas de instalación y uso del plugin, consulte [GuiaDeUso/Guia-de-instalación-y-uso.md](GuiaDeUso/Guia-de-instalación-y-uso.md).
+
