@@ -4,11 +4,15 @@
 # python -m venv venv
 # venv\Scripts\activate
 
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+import sys
+# valida automáticamente los datos que llegan al endpoint
+from pydantic import BaseModel, field_validator
+# para generar el timestamp de la respuesta
+import time
+import json
 import base64
 import io
-import json
-import sys
-import time
 from contextlib import asynccontextmanager
 
 # para generar el timestamp de la respuesta
@@ -16,19 +20,10 @@ from datetime import datetime
 from typing import Optional
 
 import numpy as np
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
 
 # valida automáticamente los datos que llegan al endpoint
 from pydantic import BaseModel, field_validator
-# para generar el timestamp de la respuesta
-from datetime import datetime, timezone
-import time
-from typing import Optional
-import json
-import base64
-import io
-from contextlib import asynccontextmanager
 
 # Importar el wrapper de SAM
 from sam_wrapper import initialize_sam, run_sam
@@ -201,7 +196,8 @@ async def infer(
     mask_b64 = base64.b64encode(mask_bytes.getvalue()).decode("utf-8")
 
     # 5. Armar respuesta
-
+    processing_time_ms = (time.time() - inicio) * 1000
+    
     return {
         "status": "ok",
         "mask_b64": mask_b64,
