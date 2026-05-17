@@ -22,9 +22,6 @@ from typing import Optional
 import numpy as np
 from PIL import Image, UnidentifiedImageError
 
-# valida automáticamente los datos que llegan al endpoint
-from pydantic import BaseModel, field_validator
-
 # Importar el wrapper de SAM
 from sam_wrapper import initialize_sam, run_sam
 
@@ -146,7 +143,7 @@ async def infer(
         labels: JSON string con array de labels [1, 1, ...] o None
                 Si no se pasa, todos los puntos son foreground (1)
     """
-    # inicio = time.time()
+    inicio = time.time()
 
     # 1. Leer imagen del upload
     image_data = await image.read()

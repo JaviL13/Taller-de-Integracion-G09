@@ -23,12 +23,13 @@ from qgis.core import (
     QgsField,
     QgsGeometry,
     QgsProject,
+    QgsPointXY,
     QgsRendererCategory,
     QgsSymbol,
     QgsVectorFileWriter,
     QgsVectorLayer,
     QgsWkbTypes,
-    QgsPointXY,
+    
 )
 
 # Para exportar anotaciones como GeoJson
@@ -274,7 +275,7 @@ class AnnotationManager:
         # Devolver el feature ya con su fid asignado.
         return agregados[0] if agregados else feature
     
-    def agregar_desde_mascara(self, mask: "np.ndarray", confidence: float = None, transform=None) -> "QgsFeature":
+    def agregar_desde_mascara(self, mask, confidence: float = None, transform=None) -> "QgsFeature":
         # Convierte una máscara SAM a polígono y lo persiste como anotación.
         # Recibe un array 2D devuelto por SAM (mask), un score de confianza del modelo (score)
         # y un affine de rasterio para georreferenciar, si es None las coordenadas quedan en pixeles (transform)
