@@ -5,6 +5,7 @@ import rasterio.features
 from rasterio.transform import Affine
 from shapely.geometry import shape
 
+
 def mask_to_geojson_polygon(mask: np.ndarray, transform=None, origin: str = "ml-annotation") -> dict:
     # Convierte una máscara binaria SAM a un polígono GeoJSON.
     # Recibe un array 2D numpy mayor a 0, que isgnifica que detectó un geoglifo (mask), 

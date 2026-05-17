@@ -22,14 +22,13 @@ from qgis.core import (
     QgsFeature,
     QgsField,
     QgsGeometry,
-    QgsProject,
     QgsPointXY,
+    QgsProject,
     QgsRendererCategory,
     QgsSymbol,
     QgsVectorFileWriter,
     QgsVectorLayer,
     QgsWkbTypes,
-    
 )
 
 # Para exportar anotaciones como GeoJson
