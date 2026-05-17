@@ -22,16 +22,18 @@ from mask_to_polygon import mask_to_geojson_polygon
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _cuadrado_mask(h=64, w=64, margen=10):
     """Máscara binaria con un cuadrado blanco centrado."""
     mask = np.zeros((h, w), dtype=np.uint8)
-    mask[margen:h - margen, margen:w - margen] = 255
+    mask[margen : h - margen, margen : w - margen] = 255
     return mask
 
 
 # ---------------------------------------------------------------------------
 # Tests: caso exitoso
 # ---------------------------------------------------------------------------
+
 
 def test_mascara_simple_produce_geojson_valido():
     """Una máscara con cuadrado central produce un Feature GeoJSON válido."""
@@ -117,6 +119,7 @@ def test_con_transform_afin_coordenadas_georreferenciadas():
 # Tests: selección del polígono principal
 # ---------------------------------------------------------------------------
 
+
 def test_selecciona_poligono_mas_grande():
     """Si hay varios contornos, debe retornar el de mayor área."""
     mask = np.zeros((100, 100), dtype=np.uint8)
@@ -134,6 +137,7 @@ def test_selecciona_poligono_mas_grande():
 # ---------------------------------------------------------------------------
 # Tests: errores controlados
 # ---------------------------------------------------------------------------
+
 
 def test_mascara_vacia_lanza_value_error():
     """Máscara completamente negra (sin detecciones) debe lanzar ValueError."""

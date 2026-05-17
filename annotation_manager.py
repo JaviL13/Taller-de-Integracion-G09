@@ -273,7 +273,7 @@ class AnnotationManager:
 
         # Devolver el feature ya con su fid asignado.
         return agregados[0] if agregados else feature
-    
+
     def agregar_desde_mascara(self, mask, confidence: float = None, transform=None) -> "QgsFeature":
         # Convierte una máscara SAM a polígono y lo persiste como anotación.
         # Recibe un array 2D devuelto por SAM (mask), un score de confianza del modelo (score)
@@ -290,9 +290,7 @@ class AnnotationManager:
         if mask_to_geojson_polygon is None:
             raise ValueError("mask_to_polygon no está disponible en este entorno.")
         # 1. Convertir máscara a GeoJSON
-        geojson_feature = mask_to_geojson_polygon(
-            mask, transform=transform, origin="ml-annotation"
-        )
+        geojson_feature = mask_to_geojson_polygon(mask, transform=transform, origin="ml-annotation")
 
         # 2. Extraer coordenadas del polígono GeoJSON y convertir a QgsGeometry
         coords = geojson_feature["geometry"]["coordinates"][0]

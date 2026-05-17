@@ -8,7 +8,7 @@ from shapely.geometry import shape
 
 def mask_to_geojson_polygon(mask: np.ndarray, transform=None, origin: str = "ml-annotation") -> dict:
     # Convierte una máscara binaria SAM a un polígono GeoJSON.
-    # Recibe un array 2D numpy mayor a 0, que isgnifica que detectó un geoglifo (mask), 
+    # Recibe un array 2D numpy mayor a 0, que isgnifica que detectó un geoglifo (mask),
     # un affine de rasterio para georreferenciar coordenadas, si es none quedan en pixeles (transform),
     # y un string con nombre por defecto "ml-annotation" (origin)
     # Devuelve un GeoJSON con geometría de polígono y propiedas con origin de estados "pending"
@@ -45,5 +45,5 @@ def mask_to_geojson_polygon(mask: np.ndarray, transform=None, origin: str = "ml-
         "properties": {
             "origin": origin,
             "status": "pending",
-        }
+        },
     }

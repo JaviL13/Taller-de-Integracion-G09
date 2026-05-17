@@ -196,7 +196,7 @@ async def infer(
 
     # 5. Armar respuesta
     processing_time_ms = (time.time() - inicio) * 1000
-    
+
     return {
         "status": "ok",
         "mask_b64": mask_b64,

@@ -922,8 +922,7 @@ class GeoGlyph:
             manager.agregar_desde_mascara(mask, confidence=confidence)
             self.iface.messageBar().pushMessage(
                 "GeoGlyph",
-                f"Segmentación guardada — origen: ml-annotation | "
-                f"confianza: {confidence * 100:.1f}%",
+                f"Segmentación guardada — origen: ml-annotation | confianza: {confidence * 100:.1f}%",
                 level=0,
                 duration=3,
             )
