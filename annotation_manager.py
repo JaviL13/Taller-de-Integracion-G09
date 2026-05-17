@@ -28,6 +28,7 @@ from qgis.core import (
     QgsVectorFileWriter,
     QgsVectorLayer,
     QgsWkbTypes,
+    QgsPointXY,
 )
 
 # Para exportar anotaciones como GeoJson
@@ -48,6 +49,7 @@ except (ImportError, AttributeError):
     _FIELD_STRING = QVariant.String
     _FIELD_DOUBLE = QVariant.Double
     _FIELD_INT = QVariant.Int
+
 
 # Import relativo cuando se carga como parte del paquete del plugin (QGIS),
 # absoluto como fallback cuando se importa suelto desde un test que solo
@@ -271,6 +273,34 @@ class AnnotationManager:
 
         # Devolver el feature ya con su fid asignado.
         return agregados[0] if agregados else feature
+    
+    def agregar_desde_mascara(self, mask: "np.ndarray", confidence: float = None, transform=None) -> "QgsFeature":
+        # Convierte una máscara SAM a polígono y lo persiste como anotación.
+        # Recibe un array 2D devuelto por SAM (mask), un score de confianza del modelo (score)
+        # y un affine de rasterio para georreferenciar, si es None las coordenadas quedan en pixeles (transform)
+        # Devuelve  El QgsFeature creado con origin='ml-annotation' y status='pending'.
+        try:
+            from .mask_to_polygon import mask_to_geojson_polygon
+        except (ImportError, SystemError):
+            try:
+                from mask_to_polygon import mask_to_geojson_polygon
+            except ImportError:
+                mask_to_geojson_polygon = None
+
+        if mask_to_geojson_polygon is None:
+            raise ValueError("mask_to_polygon no está disponible en este entorno.")
+        # 1. Convertir máscara a GeoJSON
+        geojson_feature = mask_to_geojson_polygon(
+            mask, transform=transform, origin="ml-annotation"
+        )
+
+        # 2. Extraer coordenadas del polígono GeoJSON y convertir a QgsGeometry
+        coords = geojson_feature["geometry"]["coordinates"][0]
+        puntos = [QgsPointXY(x, y) for x, y in coords]
+        geometry = QgsGeometry.fromPolygonXY([puntos])
+
+        # 3. Persistir usando el método existente
+        return self.agregar_anotacion(geometry, origin="ml-annotation", score=confidence)
 
     # ── TIGS-64: ciclo de vida (aprobar / rechazar) ────────────────────────
 

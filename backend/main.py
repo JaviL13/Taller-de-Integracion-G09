@@ -21,6 +21,14 @@ from PIL import Image, UnidentifiedImageError
 
 # valida automáticamente los datos que llegan al endpoint
 from pydantic import BaseModel, field_validator
+# para generar el timestamp de la respuesta
+from datetime import datetime, timezone
+import time
+from typing import Optional
+import json
+import base64
+import io
+from contextlib import asynccontextmanager
 
 # Importar el wrapper de SAM
 from sam_wrapper import initialize_sam, run_sam
@@ -143,7 +151,7 @@ async def infer(
         labels: JSON string con array de labels [1, 1, ...] o None
                 Si no se pasa, todos los puntos son foreground (1)
     """
-    inicio = time.time()
+    # inicio = time.time()
 
     # 1. Leer imagen del upload
     image_data = await image.read()
@@ -193,7 +201,6 @@ async def infer(
     mask_b64 = base64.b64encode(mask_bytes.getvalue()).decode("utf-8")
 
     # 5. Armar respuesta
-    processing_time_ms = round((time.time() - inicio) * 1000, 2)
 
     return {
         "status": "ok",

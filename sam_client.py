@@ -167,7 +167,7 @@ class SamWorker(QThread):
             with httpx.Client(timeout=self.TIMEOUT_SECONDS) as client:
                 response = client.post(self.url, files=files, data=data)
                 # Tiempo medido para futuros logs de diagnóstico.
-                _ = time.time() - start
+                _ = time.time() - start  # noqa: F841
 
                 # 4. Validar respuesta
                 if response.status_code != 200:
