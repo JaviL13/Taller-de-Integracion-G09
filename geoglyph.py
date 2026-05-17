@@ -916,9 +916,24 @@ class GeoGlyph:
             level=Qgis.Info,
         )
 
-        # Debug: mostrar info de la máscara (se puede remover después)
-        n_pixels = (mask > 0).sum()
-        print(f"[TIGS-70] DEBUG SAM mask: shape={mask.shape}, foreground_pixels={n_pixels}, confidence={confidence}")
+        # TIGS-71: convertir máscara a polígono y guardarlo como anotación
+        manager = self._get_or_create_annotation_manager()
+        try:
+            manager.agregar_desde_mascara(mask, confidence=confidence)
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                f"Segmentación guardada — origen: ml-annotation | "
+                f"confianza: {confidence * 100:.1f}%",
+                level=0,
+                duration=3,
+            )
+        except ValueError as e:
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                f"No se pudo convertir la máscara: {e}",
+                level=2,
+                duration=4,
+            )
 
     def _on_sam_error(self, msg: str):
         """Callback ejecutado cuando SamWorker falla.
