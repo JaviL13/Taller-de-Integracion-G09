@@ -138,7 +138,8 @@ class GeoGlyph:
 
         # TIGS 83: Conecciones para la tabla de polígonos
         self.panel.combo_filtro_estado.currentTextChanged.connect(self._cargar_tabla_poligonos)
-        self.panel.table_poligonos.cellClicked.connect(self._on_poligono_tabla_clicked)  # Centrar mapa al hacer click en fila
+        # Centrar mapa al hacer click en fila   
+        self.panel.table_poligonos.cellClicked.connect(self._on_poligono_tabla_clicked)  
 
         # NOTA: ya no se auto-inicializa el AnnotationManager al cargar el
         # plugin. Antes se hacía acá y eso provocaba que las anotaciones
