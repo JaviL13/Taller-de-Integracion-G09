@@ -24,15 +24,15 @@ class GeoGlyphPanel(QDockWidget):
         super(GeoGlyphPanel, self).__init__("GeoGlyph", parent)
         self.iface = iface
         self.setObjectName("GeoGlyphPanel")
-        
+
         # Esto es para hacer las pestañas
         self.tabs = QTabWidget()
-        
+
         # TAB 1 - Panel Actual
         tab_main = QWidget()
         tab_main_layout = QVBoxLayout()
         tab_main.setLayout(tab_main_layout)
-    
+
         scroll = QScrollArea()  # Agregué un scroll para que se vea el panel completo
         scroll.setWidgetResizable(True)
         container = QWidget()
@@ -206,7 +206,7 @@ class GeoGlyphPanel(QDockWidget):
         # Espaciador al final para más orden
         layout.addStretch()
 
-        # TAB 2 - Listado de polígonos 
+        # TAB 2 - Listado de polígonos
         tab_poligonos = QWidget()
         poligonos_layout = QVBoxLayout()
         tab_poligonos.setLayout(poligonos_layout)

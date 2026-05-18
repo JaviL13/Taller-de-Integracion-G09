@@ -138,8 +138,8 @@ class GeoGlyph:
 
         # TIGS 83: Conecciones para la tabla de polígonos
         self.panel.combo_filtro_estado.currentTextChanged.connect(self._cargar_tabla_poligonos)
-        # Centrar mapa al hacer click en fila   
-        self.panel.table_poligonos.cellClicked.connect(self._on_poligono_tabla_clicked)  
+        # Centrar mapa al hacer click en fila
+        self.panel.table_poligonos.cellClicked.connect(self._on_poligono_tabla_clicked)
 
         # NOTA: ya no se auto-inicializa el AnnotationManager al cargar el
         # plugin. Antes se hacía acá y eso provocaba que las anotaciones
@@ -1086,33 +1086,33 @@ class GeoGlyph:
         self._infer_worker.start()
 
     # TIGS 83: Métodos para la tabla de polígonos ─────────────────────────────────
-    
+
     # Este primer método, carga todos los polígonos del GeoPackage en la tabla de la pestaña 2.
-    # Lee los features de la capa annotations y los muestra con su estado, origen y score. 
+    # Lee los features de la capa annotations y los muestra con su estado, origen y score.
     # Si hay un filtro de estado activo, muestra solo los que correspondan.
-    
+
     def _cargar_tabla_poligonos(self):
         manager = self._get_or_create_annotation_manager()
         if manager is None:
             return
 
-        filtro = self.panel.combo_filtro_estado.currentText().lower()        # Leer el filtro activo
-        self.panel.table_poligonos.setRowCount(0)                            # Limpiar la tabla antes de rellenar
-        self._fids_tabla = []                   # Guardar los IDs de cada fila para poder centrar el mapa al hacer clic
+        filtro = self.panel.combo_filtro_estado.currentText().lower()  # Leer el filtro activo
+        self.panel.table_poligonos.setRowCount(0)  # Limpiar la tabla antes de rellenar
+        self._fids_tabla = []  # Guardar los IDs de cada fila para poder centrar el mapa al hacer clic
 
         for feature in manager.layer.getFeatures():
             estado = feature.attribute("status") or ""
             origen = feature.attribute("origin") or ""
             score = feature.attribute("score")
 
-            if filtro != "all" and estado != filtro:                         # Aplicar filtro
+            if filtro != "all" and estado != filtro:  # Aplicar filtro
                 continue
 
-            row = self.panel.table_poligonos.rowCount()                      # Agregar fila
+            row = self.panel.table_poligonos.rowCount()  # Agregar fila
             self.panel.table_poligonos.insertRow(row)
             self.panel.table_poligonos.setItem(row, 0, QTableWidgetItem(estado))
             self.panel.table_poligonos.setItem(row, 1, QTableWidgetItem(origen))
-            if score is None or str(score) == "NULL":             # Esto es para cuando el score es de tipo QVariant
+            if score is None or str(score) == "NULL":  # Esto es para cuando el score es de tipo QVariant
                 score_texto = "—"
             else:
                 try:
@@ -1121,12 +1121,11 @@ class GeoGlyph:
                     score_texto = "—"
             self.panel.table_poligonos.setItem(row, 2, QTableWidgetItem(score_texto))
 
-            self._fids_tabla.append(feature.id())                       # Guardar IDs en la misma posición que la fila
+            self._fids_tabla.append(feature.id())  # Guardar IDs en la misma posición que la fila
 
-    
-    # Este segundo método es el callback. Cuando el usuario hace clic en una fila de la tabla, 
+    # Este segundo método es el callback. Cuando el usuario hace clic en una fila de la tabla,
     # se centra el mapa en el polígono, lo selecciona en la capa y carga sus notas en el campo input_notas del panel.
-    
+
     def _on_poligono_tabla_clicked(self, row, column):
         if not hasattr(self, "_fids_tabla") or row >= len(self._fids_tabla):
             return
@@ -1135,14 +1134,14 @@ class GeoGlyph:
         if manager is None:
             return
 
-        fid = self._fids_tabla[row]                                      # fid = Feature ID
+        fid = self._fids_tabla[row]  # fid = Feature ID
         feature = manager.layer.getFeature(fid)
         if not feature.isValid():
             return
-        manager.layer.selectByIds([fid])                                  # Seleccionar el feature en la capa
+        manager.layer.selectByIds([fid])  # Seleccionar el feature en la capa
 
         # Centrar el mapa en el polígono
         self.iface.mapCanvas().zoomToFeatureIds(manager.layer, [fid])
 
-        notas = manager.leer_notas(fid)                                 # Cargar las notas en el panel de la pestaña 1
+        notas = manager.leer_notas(fid)  # Cargar las notas en el panel de la pestaña 1
         self.panel.input_notas.setText(notas)
