@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # import os
 from qgis.PyQt.QtCore import Qt
-from qgis.PyQt.QtWidgets import QComboBox, QDockWidget, QFrame, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
-
+from qgis.PyQt.QtWidgets import (QComboBox, QDockWidget, QFrame, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget,
+QTabWidget, QTableWidget, QHBoxLayout, QScrollArea)
 
 class GeoGlyphPanel(QDockWidget):
     # Panel lateral acoplable de GeoGlyph
@@ -11,20 +11,25 @@ class GeoGlyphPanel(QDockWidget):
         super(GeoGlyphPanel, self).__init__("GeoGlyph", parent)
         self.iface = iface
         self.setObjectName("GeoGlyphPanel")
-        # Le da un nombre único al panel. QGIS usa este nombre para recordar la
-        # posición del panel entre sesiones (si se mueve a la izquierda, la
-        # próxima vez aparece en la izquierda)
-
-        # Widget contenedor principal
-        # No se pueden poner botones por separado, por eso un widget contenedor
-        from qgis.PyQt.QtWidgets import QScrollArea
-
+        
+        # Esto es para hacer las pestañas
+        self.tabs = QTabWidget()
+        
+        # TAB 1 - Panel Actual
+        tab_main = QWidget()
+        tab_main_layout = QVBoxLayout()
+        tab_main.setLayout(tab_main_layout)
+    
         scroll = QScrollArea()  # Agregué un scroll para que se vea el panel completo
         scroll.setWidgetResizable(True)
         container = QWidget()
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignTop)
         container.setLayout(layout)
+        scroll.setWidget(container)
+
+        tab_main_layout.addWidget(scroll)
+        self.tabs.addTab(tab_main, "Principal")
 
         # Cargar GeoTIFF
         layout.addWidget(self._seccion_titulo(" Cargar imagen"))
@@ -187,8 +192,28 @@ class GeoGlyphPanel(QDockWidget):
 
         # Espaciador al final para más orden
         layout.addStretch()
-        scroll.setWidget(container)
-        self.setWidget(scroll)
+
+        # TAB 2 - Listado de polígonos 
+        tab_poligonos = QWidget()
+        poligonos_layout = QVBoxLayout()
+        tab_poligonos.setLayout(poligonos_layout)
+
+        # Filtro por estados
+        filtro_layout = QHBoxLayout()
+        filtro_layout.addWidget(QLabel("Filtrar por estado:"))
+        self.combo_filtro_estado = QComboBox()
+        self.combo_filtro_estado.addItems(["All", "Approved", "Rejected", "Pending"])
+        filtro_layout.addWidget(self.combo_filtro_estado)
+        poligonos_layout.addLayout(filtro_layout)
+
+        # Tabla de polígonos
+        self.table_poligonos = QTableWidget()
+        self.table_poligonos.setColumnCount(3)
+        self.table_poligonos.setHorizontalHeaderLabels(["Estado", "Origen", "Score"])
+        poligonos_layout.addWidget(self.table_poligonos)
+        self.tabs.addTab(tab_poligonos, "Polígonos")
+
+        self.setWidget(self.tabs)
 
     def _seccion_titulo(self, texto):
         # Crea una etiqueta de título de sección.
