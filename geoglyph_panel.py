@@ -2,7 +2,7 @@
 # import os
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import (QComboBox, QDockWidget, QFrame, QHBoxLayout, QLabel, QLineEdit, 
-QPushButton, QScrollArea, QTabWidget, QTableWidget QVBoxLayout, QWidget)
+QPushButton, QScrollArea, QTabWidget, QTableWidget, QVBoxLayout, QWidget)
 
 class GeoGlyphPanel(QDockWidget):
     # Panel lateral acoplable de GeoGlyph
