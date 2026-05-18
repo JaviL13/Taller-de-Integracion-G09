@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-# import os
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import (
     QComboBox,
@@ -15,6 +13,9 @@ from qgis.PyQt.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+# -*- coding: utf-8 -*-
+# import os
 
 class GeoGlyphPanel(QDockWidget):
     # Panel lateral acoplable de GeoGlyph
