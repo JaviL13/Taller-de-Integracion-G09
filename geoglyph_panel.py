@@ -10,11 +10,12 @@ from qgis.PyQt.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
-    QTabWidget,
     QTableWidget,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
+
 
 class GeoGlyphPanel(QDockWidget):
     # Panel lateral acoplable de GeoGlyph
