@@ -36,6 +36,7 @@ from qgis.PyQt.QtWidgets import QAction, QTableWidgetItem
 from .annotation_manager import AnnotationManager
 from .annotation_state import StateTransitionError  # ← TIGS-64
 from .annotation_tool import PolygonDrawTool  # Se importa para crear los dibujos
+from .color_ramp_worker import ColorRampWorker  # TIGS-S5-04
 from .decorrelation_dialog import DecorrelationStretchDialog
 from .geoglyph_dialog import GeoGlyphDialog
 from .geoglyph_panel import GeoGlyphPanel  # Se importa el panel con los botones
@@ -64,6 +65,9 @@ class GeoGlyph:
         self.menu = self.tr("&GeoGlyph")
         self.panel = None
         self._worker = None  # referencia al worker activo (evita GC prematuro)
+        self._color_ramp_worker = None  # TIGS-S5-04: worker para Color Ramp async
+        self._color_ramp_context: dict = {}  # contexto capturado al lanzar el worker
+        self._dstretch_dialog = None  # referencia al diálogo DStretch no-modal
         self._draw_tool = None  # Para la funcionalidad de dibujo
         self._annotation_manager = None  # Para la funcionalidad de dibujo
         self._roi_tool = None  # TIGS-53: herramienta de ROI rectangular
@@ -187,10 +191,15 @@ class GeoGlyph:
             self.panel.setParent(None)  # Desvincula del árbol Qt (evita warning al recargar)
             self.panel = None
 
-        # Detener worker si sigue corriendo al cerrar el plugin
+        # Detener workers si siguen corriendo al cerrar el plugin.
         if self._worker is not None and self._worker.isRunning():
             self._worker.quit()
             self._worker.wait()
+
+        # TIGS-S5-04: worker de Color Ramp async.
+        if self._color_ramp_worker is not None and self._color_ramp_worker.isRunning():
+            self._color_ramp_worker.quit()
+            self._color_ramp_worker.wait()
 
         # TIGS-53: idem para el worker de /infer.
         if self._infer_worker is not None and self._infer_worker.isRunning():
@@ -261,28 +270,27 @@ class GeoGlyph:
                 self.panel.combo_band.setCurrentIndex(index)
 
     def apply_color_ramp(self):
-        from PyQt5.QtGui import QColor  # define colores
-        from qgis.core import (
-            QgsColorRampShader,  # define los colores
-            QgsProject,  # agrega la capa al mapa
-            QgsRasterShader,  # aplica los colores
-            QgsSingleBandPseudoColorRenderer,  # muestra los resultados
-        )
+        """Lanza ColorRampWorker para calcular estadísticas off-thread.
 
-        # Obtener tipo de esquema de color
-        ramp_type = self.panel.combo_color_ramp.currentText()
+        Las estadísticas (min/max) se calculan en un QThread para no bloquear
+        la UI. El renderer QGIS se aplica en _on_color_ramp_done() cuando
+        el worker termina. (TIGS-S5-04)
+        """
+        if self.panel is None:
+            return
 
-        # Obtener la capa seleccionada en QGIS
+        # Evitar doble-click mientras hay un worker corriendo.
+        if self._color_ramp_worker is not None and self._color_ramp_worker.isRunning():
+            return
+
+        # Resolver la capa raster activa.
+        from qgis.core import QgsProject
+
         layer = self.iface.activeLayer()
-
-        # Evita error si el usuario no seleccionó nada
         if layer is None:
             self.iface.messageBar().pushMessage("Error", "No hay capa activa", level=2)
             return
 
-        # Si la capa activa no es raster (p.ej. la capa de anotaciones quedó
-        # arriba en el árbol), no podemos pedir bandStatistics — buscamos
-        # el primer raster del proyecto y lo usamos en su lugar.
         if not isinstance(layer, QgsRasterLayer):
             raster = next(
                 (cap for cap in QgsProject.instance().mapLayers().values() if isinstance(cap, QgsRasterLayer)),
@@ -297,70 +305,118 @@ class GeoGlyph:
                 return
             layer = raster
 
-        # Acceder a los datos del ráster
-        provider = layer.dataProvider()
-
-        # Banda seleccionada por usuario
-        band = int(self.panel.combo_band.currentText())
-
-        # Obtener min/max
-        stats = provider.bandStatistics(band)
+        ramp_type = self.panel.combo_color_ramp.currentText()
+        band_text = self.panel.combo_band.currentText().strip()
+        if not band_text:
+            self.panel.lbl_enhance_status.setText("Selecciona una capa raster primero")
+            self.panel.lbl_enhance_status.setStyleSheet("color: orange; font-size: 10px; margin-left: 4px;")
+            self.panel.btn_apply.setEnabled(True)
+            return
+        band = int(band_text)
         min_text = self.panel.input_min.text().strip()
         max_text = self.panel.input_max.text().strip()
+        min_val = float(min_text) if min_text else None
+        max_val = float(max_text) if max_text else None
 
-        # Automáticamente si está vacío
-        min_val = float(min_text) if min_text else stats.minimumValue
-        max_val = float(max_text) if max_text else stats.maximumValue
+        # Guardar contexto para el callback (evita leer la UI desde el worker).
+        self._color_ramp_context = {"ramp_type": ramp_type, "band": band, "layer": layer}
 
-        # Validar que min<max
+        # UI en modo "procesando".
+        self.panel.btn_apply.setEnabled(False)
+        self.panel.lbl_enhance_status.setText("Calculando estadísticas de banda…")
+        self.panel.lbl_enhance_status.setStyleSheet("color: orange; font-size: 10px; margin-left: 4px;")
+
+        src_path = layer.source()
+        if "|" in src_path:
+            src_path = src_path.split("|", 1)[0]
+
+        self._color_ramp_worker = ColorRampWorker(src_path, band, min_val=min_val, max_val=max_val)
+        self._color_ramp_worker.progress.connect(self._on_color_ramp_progress)
+        self._color_ramp_worker.finished.connect(self._on_color_ramp_done)
+        self._color_ramp_worker.error.connect(self._on_color_ramp_error)
+        self._color_ramp_worker.start()
+
+    def _on_color_ramp_progress(self, done: int, total: int) -> None:
+        """Actualiza el label de estado con el porcentaje de avance."""
+        if self.panel is None:
+            return
+        pct = int(100 * done / max(total, 1))
+        self.panel.lbl_enhance_status.setText(f"Leyendo estadísticas de banda… {pct}%")
+        self.panel.lbl_enhance_status.setStyleSheet("color: orange; font-size: 10px; margin-left: 4px;")
+
+    def _on_color_ramp_done(self, min_val: float, max_val: float) -> None:
+        """Aplica el renderer Color Ramp en el hilo principal. (TIGS-S5-04)"""
+        if self.panel is None:
+            return
+
+        self.panel.btn_apply.setEnabled(True)
+
         if min_val >= max_val:
+            self.panel.lbl_status.setText("Estado: —")
             self.iface.messageBar().pushMessage(
                 "Error",
                 "Min debe ser menor que Max",
-                level=2,  # mensaje de error
+                level=2,
                 duration=3,
             )
             return
 
-        # Crear color ramp (viridis simple, rojo, verde, azul)
+        ctx = self._color_ramp_context
+        ramp_type = ctx.get("ramp_type", "viridis")
+        band = ctx.get("band", 1)
+        layer = ctx.get("layer")
+        if layer is None:
+            return
+
+        from PyQt5.QtGui import QColor
+        from qgis.core import (
+            QgsColorRampShader,
+            QgsProject,
+            QgsRasterShader,
+            QgsSingleBandPseudoColorRenderer,
+        )
+
         color_ramp = QgsColorRampShader()
         color_ramp.setColorRampType(QgsColorRampShader.Interpolated)
 
-        # Definir cómo mapear los valores (colores) según esquema escogido por usuario
-        # viridis (paleta secuencial, de oscuro a claro)
+        mid = (min_val + max_val) / 2
         if ramp_type == "viridis":
             items = [
-                # valores bajos oscuros (morado oscuro)
                 QgsColorRampShader.ColorRampItem(min_val, QColor(68, 1, 84)),
-                # valores medios un poco más claros (verde/azul)
-                QgsColorRampShader.ColorRampItem((min_val + max_val) / 2, QColor(32, 144, 140)),
-                QgsColorRampShader.ColorRampItem(max_val, QColor(253, 231, 37)),  # valores altos claros (amarillo)
+                QgsColorRampShader.ColorRampItem(mid, QColor(32, 144, 140)),
+                QgsColorRampShader.ColorRampItem(max_val, QColor(253, 231, 37)),
             ]
-        # RdYlGn (esquema divergente tipo semáforo (rojo-> amarillo -> verde))
         elif ramp_type == "RdYlGn":
             items = [
-                QgsColorRampShader.ColorRampItem(min_val, QColor(165, 0, 38)),  # valores bajos o críticos rojo
-                QgsColorRampShader.ColorRampItem((min_val + max_val) / 2, QColor(255, 255, 191)),
-                # valores medios amarillo
-                QgsColorRampShader.ColorRampItem(max_val, QColor(0, 104, 55)),  # valores altos o favorables verde
+                QgsColorRampShader.ColorRampItem(min_val, QColor(165, 0, 38)),
+                QgsColorRampShader.ColorRampItem(mid, QColor(255, 255, 191)),
+                QgsColorRampShader.ColorRampItem(max_val, QColor(0, 104, 55)),
             ]
+        else:
+            items = []
 
         color_ramp.setColorRampItemList(items)
-
-        # Aplicar la lógica del color ramp
         shader = QgsRasterShader()
         shader.setRasterShaderFunction(color_ramp)
 
-        # Mostrar la banda seleccionada con estos colores
+        provider = layer.dataProvider()
         renderer = QgsSingleBandPseudoColorRenderer(provider, band, shader)
-
-        # Crear nueva capa para no modificar original
         new_layer = layer.clone()
         new_layer.setRenderer(renderer)
         new_layer.setName(f"{layer.name()}_{ramp_type}")
-
-        # Mostrar en QGIS, en el panel de capas
         QgsProject.instance().addMapLayer(new_layer)
+
+        self.panel.lbl_enhance_status.setText(f"Color Ramp «{ramp_type}» aplicado ✓")
+        self.panel.lbl_enhance_status.setStyleSheet("color: green; font-size: 10px; margin-left: 4px;")
+
+    def _on_color_ramp_error(self, msg: str) -> None:
+        """Muestra el error de ColorRampWorker en la UI."""
+        if self.panel is None:
+            return
+        self.panel.btn_apply.setEnabled(True)
+        self.panel.lbl_enhance_status.setText(f"Error: {msg}")
+        self.panel.lbl_enhance_status.setStyleSheet("color: red; font-size: 10px; margin-left: 4px;")
+        self.iface.messageBar().pushMessage("GeoGlyph — Color Ramp", msg, level=2, duration=5)
 
     def exportar_capa_realzada(self):
         # Herramientas para escribir ráster a disco
@@ -450,9 +506,14 @@ class GeoGlyph:
             self.iface.messageBar().pushMessage("Error", "No se pudo exportar la capa", level=2)
 
     def abrir_decorrelation_stretch(self):
-        """Abre el diálogo para aplicar decorrelation stretch (PCA sobre 3 bandas)."""
-        dlg = DecorrelationStretchDialog(self.iface, parent=self.iface.mainWindow())
-        dlg.exec_()
+        """Abre el diálogo DStretch en modo no-modal para que QGIS siga usable."""
+        # Si ya hay un diálogo abierto, lo traemos al frente.
+        if self._dstretch_dialog is not None and self._dstretch_dialog.isVisible():
+            self._dstretch_dialog.raise_()
+            self._dstretch_dialog.activateWindow()
+            return
+        self._dstretch_dialog = DecorrelationStretchDialog(self.iface, parent=self.iface.mainWindow())
+        self._dstretch_dialog.show()  # no-modal: QGIS sigue completamente usable
 
     def run(self):
         # Muestra u oculta el panel lateral.

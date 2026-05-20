@@ -96,6 +96,12 @@ class GeoGlyphPanel(QDockWidget):
         btn_side_by_side.setEnabled(False)
         layout.addWidget(btn_side_by_side)
 
+        # Label de estado del realce (Color Ramp / DStretch) — TIGS-S5-04
+        self.lbl_enhance_status = QLabel("")
+        self.lbl_enhance_status.setWordWrap(True)
+        self.lbl_enhance_status.setStyleSheet("color: gray; font-size: 10px; margin-left: 4px;")
+        layout.addWidget(self.lbl_enhance_status)
+
         layout.addWidget(self._separador())
 
         # Anotaciones
