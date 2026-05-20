@@ -28,7 +28,10 @@ import torch
 try:
     from mobile_sam import SamPredictor, sam_model_registry
 except ImportError:
-    raise ImportError("mobile-sam no está instalado. Ejecuta: pip install mobile-sam")
+    raise ImportError(
+        "No se pudo importar MobileSAM. Ejecuta pip install -r requirements.txt "
+        "en el backend para instalar mobile-sam y sus dependencias."
+    )
 
 # Ruta al checkpoint del modelo. En producción, el archivo debería estar
 # empaquetado con el backend (p.ej. en una carpeta 'models/').

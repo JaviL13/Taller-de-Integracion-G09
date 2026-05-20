@@ -52,14 +52,14 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Endpoints útiles
-- `http://localhost:8000/health`
-- `http://localhost:8000/info`
-- `http://localhost:8000/docs`
+- `http://127.0.0.1:8000/health`
+- `http://127.0.0.1:8000/info`
+- `http://127.0.0.1:8000/docs`
 
 Prueba rápida del endpoint `/infer`
 
 ```bash
-curl -X POST "http://localhost:8000/infer" -F "image=@/ruta/a/tu/roi.png" -s | jq .
+curl -X POST "http://127.0.0.1:8000/infer" -F "image=@/ruta/a/tu/roi.png" -s | jq .
 ```
 
 Notas para QGIS / el plugin
@@ -72,7 +72,8 @@ Problemas comunes
 - GPU: asegúrese de que los drivers y la versión de CUDA coincidan con la rueda de PyTorch instalada.
 
 Uso en desarrollo
-- Conecte el plugin GeoGlyph a `http://localhost:8000` en el panel de configuración.
+- Conecte el plugin GeoGlyph a `http://127.0.0.1:8000` en el panel de configuración.
+- En macOS, `127.0.0.1` evita problemas de resolución de `localhost` a IPv6 (`::1`) cuando el backend está escuchando solo en IPv4.
 - Si el backend no está disponible, el plugin sigue funcionando con las funcionalidades no dependientes de inferencia.
 
 Contacto
