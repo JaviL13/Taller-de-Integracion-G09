@@ -160,6 +160,7 @@ class GeoGlyph:
 
         # Agregar el panel a QGIS (lado derecho por defecto)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
+        self.panel.show()  # Fuerza visibilidad al cargar/recargar (evita que QGIS restaure estado "oculto")
 
     def unload(self):
         """Elimina el plugin del menú y toolbar de QGIS."""
@@ -183,6 +184,7 @@ class GeoGlyph:
 
         if self.panel is not None:
             self.iface.removeDockWidget(self.panel)
+            self.panel.setParent(None)  # Desvincula del árbol Qt (evita warning al recargar)
             self.panel = None
 
         # Detener worker si sigue corriendo al cerrar el plugin
