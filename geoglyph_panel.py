@@ -160,12 +160,10 @@ class GeoGlyphPanel(QDockWidget):
         # Inferencia ML
         layout.addWidget(self._seccion_titulo(" Inferencia ML"))
 
-        self.btn_inferencia = QPushButton("Ejecutar inferencia SAM")
-        self.btn_inferencia.setToolTip(
-            "Temporalmente deshabilitado: la inferencia SAM se ejecuta automáticamente al seleccionar ROI"
-        )
-        self.btn_inferencia.setEnabled(False)
-        layout.addWidget(self.btn_inferencia)
+        self.btn_ejecutar_sam = QPushButton("Ejecutar SAM")
+        self.btn_ejecutar_sam.setToolTip("Ejecuta el modelo SAM sobre el ROI activo. Selecciona un ROI primero.")
+        self.btn_ejecutar_sam.setEnabled(False)
+        layout.addWidget(self.btn_ejecutar_sam)
 
         # Boton para renderizar
         self.btn_infer = QPushButton("Renderizar segmentación")
