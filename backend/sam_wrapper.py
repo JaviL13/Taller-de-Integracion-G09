@@ -14,8 +14,9 @@ MobileSAM es más ligero que SAM original pero sigue siendo un modelo
 robusto de segmentación. La API es compatible con la de SAM estándar.
 """
 
+from typing import Optional, Tuple
+
 import numpy as np
-from typing import Tuple, Optional
 import torch
 
 # Importar MobileSAM. La estructura es:
@@ -25,10 +26,11 @@ import torch
 # El modelo se puede encontrar en:
 #   https://github.com/ChaoningZhang/MobileSAM
 try:
-    from mobile_sam import sam_model_registry, SamPredictor
+    from mobile_sam import SamPredictor, sam_model_registry
 except ImportError:
     raise ImportError(
-        "mobile-sam no está instalado. Ejecuta: pip install mobile-sam"
+        "No se pudo importar MobileSAM. Ejecuta pip install -r requirements.txt "
+        "en el backend para instalar mobile-sam y sus dependencias."
     )
 
 # Ruta al checkpoint del modelo. En producción, el archivo debería estar
@@ -99,10 +101,7 @@ def run_sam(
                        de la máscara (score del predictor).
     """
     if _sam_model is None or _sam_predictor is None:
-        raise RuntimeError(
-            "El modelo SAM no ha sido inicializado. "
-            "Llama a initialize_sam() primero."
-        )
+        raise RuntimeError("El modelo SAM no ha sido inicializado. Llama a initialize_sam() primero.")
 
     # MobileSAM espera imagen RGB uint8 en [0, 255].
     if image.dtype != np.uint8:

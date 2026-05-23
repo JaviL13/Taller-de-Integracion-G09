@@ -30,14 +30,14 @@ Manejo de errores (degradación controlada):
   - Timeout (30s) → emite error.
 """
 
-import time
 import base64
 import io
 import json
+import time
 from typing import Optional
-import numpy as np
 
-from qgis.PyQt.QtCore import QThread, pyqtSignal, QBuffer, QIODevice
+import numpy as np
+from qgis.PyQt.QtCore import QBuffer, QIODevice, QThread, pyqtSignal
 from qgis.PyQt.QtGui import QImage
 
 
@@ -50,7 +50,7 @@ class SamWorker(QThread):
 
     Args:
         image: np.ndarray de forma (H, W, 3) en [0, 255] (uint8) o [0, 1] (float).
-        url: URL base del backend (p.ej. "http://localhost:8000").
+        url: URL base del backend (p.ej. "http://127.0.0.1:8000").
         points: opcional, array de puntos [[x1, y1], ...] para refinamiento.
         labels: opcional, array de labels [1, 1, ...].
         parent: parent Qt (opcional).
@@ -65,7 +65,7 @@ class SamWorker(QThread):
     def __init__(
         self,
         image: np.ndarray,
-        url: str = "http://localhost:8000",
+        url: str = "http://127.0.0.1:8000",
         points: Optional[list] = None,
         labels: Optional[list] = None,
         parent=None,
@@ -131,10 +131,7 @@ class SamWorker(QThread):
             try:
                 import httpx
             except ImportError:
-                self.error.emit(
-                    "httpx no está instalado en el entorno de QGIS. "
-                    "Instálalo para usar inferencia SAM."
-                )
+                self.error.emit("httpx no está instalado en el entorno de QGIS. Instálalo para usar inferencia SAM.")
                 return
 
             # Asegurar que es uint8 [0, 255]
@@ -156,61 +153,58 @@ class SamWorker(QThread):
 
             # 2. Preparar multipart/form-data
             files = {
-                'image': ('roi.png', image_bytes, 'image/png'),
+                "image": ("roi.png", image_bytes, "image/png"),
             }
             data = {}
 
             # Agregar puntos y labels si se proporcionaron
             if self.points is not None:
-                data['points'] = json.dumps(np.asarray(self.points).tolist())
+                data["points"] = json.dumps(np.asarray(self.points).tolist())
             if self.labels is not None:
-                data['labels'] = json.dumps(np.asarray(self.labels).tolist())
+                data["labels"] = json.dumps(np.asarray(self.labels).tolist())
 
             # 3. Ejecutar POST con httpx
             with httpx.Client(timeout=self.TIMEOUT_SECONDS) as client:
                 response = client.post(self.url, files=files, data=data)
-                elapsed = time.time() - start  # noqa: F841
+                # Tiempo medido para futuros logs de diagnóstico.
+                _ = time.time() - start  # noqa: F841
 
                 # 4. Validar respuesta
                 if response.status_code != 200:
                     try:
                         body = response.json()
                         if isinstance(body, dict):
-                            if 'detail' in body:
-                                error_msg = str(body['detail'])
+                            if "detail" in body:
+                                error_msg = str(body["detail"])
                             else:
-                                error_msg = body.get('error', str(body))
+                                error_msg = body.get("error", str(body))
                         else:
                             error_msg = str(body)
                     except Exception:
                         error_msg = response.text[:200]
-                    self.error.emit(
-                        f"HTTP {response.status_code}: {error_msg}"
-                    )
+                    self.error.emit(f"HTTP {response.status_code}: {error_msg}")
                     return
 
                 # 5. Parsear respuesta JSON
                 try:
                     body = response.json()
                 except json.JSONDecodeError:
-                    self.error.emit(
-                        "Respuesta del backend no es JSON válido"
-                    )
+                    self.error.emit("Respuesta del backend no es JSON válido")
                     return
 
                 # 6. Validar estructura de respuesta
-                if body.get('status') != 'ok':
-                    error_msg = body.get('error', 'Status no es ok')
+                if body.get("status") != "ok":
+                    error_msg = body.get("error", "Status no es ok")
                     self.error.emit(f"Backend error: {error_msg}")
                     return
 
                 # 7. Decodificar máscara desde base64
                 try:
-                    mask_b64 = body.get('mask_b64', '')
+                    mask_b64 = body.get("mask_b64", "")
                     mask_bytes = base64.b64decode(mask_b64)
                     mask_array = self._png_bytes_to_array(mask_bytes)
 
-                    confidence = float(body.get('confidence', 0.0))
+                    confidence = float(body.get("confidence", 0.0))
 
                     # Emitir señal de éxito en el hilo principal
                     self.finished.emit(mask_array, confidence)
@@ -220,18 +214,12 @@ class SamWorker(QThread):
                     return
 
         except TimeoutError:
-            self.error.emit(
-                f"Timeout: el backend no respondió en {self.TIMEOUT_SECONDS}s"
-            )
+            self.error.emit(f"Timeout: el backend no respondió en {self.TIMEOUT_SECONDS}s")
 
         except httpx.RequestError as e:
             # Backend no disponible, timeout, error de red, etc.
-            self.error.emit(
-                f"Backend no disponible en {self.url} — {type(e).__name__}: {str(e)[:100]}"
-            )
+            self.error.emit(f"Backend no disponible en {self.url} — {type(e).__name__}: {str(e)[:100]}")
 
         except Exception as e:
             # Captura general para errores inesperados
-            self.error.emit(
-                f"Error inesperado: {type(e).__name__}: {str(e)[:100]}"
-            )
+            self.error.emit(f"Error inesperado: {type(e).__name__}: {str(e)[:100]}")

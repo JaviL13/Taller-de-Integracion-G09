@@ -1,3 +1,5 @@
+# el contenido dentro del archivo se ha ocupado IA para poder aplicar técnicas más
+# específicas y poder resolver errores de código que advertía la consola de qgis
 # Se encarga de guardar el polígono creado.
 # Crea una capa annotations respaldada por un archivo .gpkg en disco.
 # Cada cambio (agregar polígono, aprobar/rechazar) se persiste automáticamente
@@ -9,25 +11,45 @@
 # GPKG-backed (provider 'ogr') para que los cambios sobrevivan al cierre
 # de QGIS y para no sobreescribir el archivo en cada guardado.
 
-
+import json
 import os
 from datetime import datetime, timezone
 
 from qgis.core import (
-    QgsVectorLayer,
-    QgsField,
-    QgsFeature,
-    QgsGeometry,
-    QgsProject,
-    QgsVectorFileWriter,
-    QgsCoordinateTransformContext,
+    NULL,
     QgsCategorizedSymbolRenderer,
+    QgsCoordinateTransformContext,
+    QgsFeature,
+    QgsField,
+    QgsGeometry,
+    QgsPointXY,
+    QgsProject,
     QgsRendererCategory,
     QgsSymbol,
+    QgsVectorFileWriter,
+    QgsVectorLayer,
     QgsWkbTypes,
 )
+
+# Para exportar anotaciones como GeoJson
 from qgis.PyQt.QtCore import QVariant
 from qgis.PyQt.QtGui import QColor
+from qgis.PyQt.QtWidgets import QFileDialog
+
+# Compatibilidad QGIS 3.38+: el constructor de QgsField con QVariant.Type
+# quedó deprecado y prefiere QMetaType.Type. Hacemos fallback por si el
+# plugin se ejecuta en una versión vieja de QGIS donde QMetaType no existe.
+try:
+    from qgis.PyQt.QtCore import QMetaType
+
+    _FIELD_STRING = QMetaType.Type.QString
+    _FIELD_DOUBLE = QMetaType.Type.Double
+    _FIELD_INT = QMetaType.Type.Int
+except (ImportError, AttributeError):
+    _FIELD_STRING = QVariant.String
+    _FIELD_DOUBLE = QVariant.Double
+    _FIELD_INT = QVariant.Int
+
 
 # Import relativo cuando se carga como parte del paquete del plugin (QGIS),
 # absoluto como fallback cuando se importa suelto desde un test que solo
@@ -108,9 +130,7 @@ class AnnotationManager:
         uri = f"{self.gpkg_path}|layername={GPKG_TABLE}"
         layer = QgsVectorLayer(uri, GPKG_TABLE, "ogr")
         if not layer.isValid():
-            raise RuntimeError(
-                f"No se pudo abrir la capa '{GPKG_TABLE}' en {self.gpkg_path}"
-            )
+            raise RuntimeError(f"No se pudo abrir la capa '{GPKG_TABLE}' en {self.gpkg_path}")
 
         # 4. Migrar al GPKG los features rescatados de capas memory obsoletas.
         if features_a_migrar:
@@ -128,9 +148,7 @@ class AnnotationManager:
                 )
                 nuevo.setAttribute(
                     "origin",
-                    feat_viejo.attribute("origin")
-                    if "origin" in feat_viejo.fields().names()
-                    else "human",
+                    feat_viejo.attribute("origin") if "origin" in feat_viejo.fields().names() else "human",
                 )
                 nuevo.setAttribute(
                     "timestamp",
@@ -142,15 +160,21 @@ class AnnotationManager:
             layer.dataProvider().addFeatures(nuevos)
 
         # Registrar en el proyecto QGIS y aplicar el estilo categorizado.
-        QgsProject.instance().addMapLayer(layer)
+        # Pasamos addToLegend=False y luego insertLayer(0, ...) para forzar
+        # que la capa de anotaciones quede ARRIBA del raster en el árbol de
+        # capas; si la dejamos al final, los polígonos quedan tapados por
+        # la imagen y se ven invisibles aunque existan en la tabla.
+        proyecto = QgsProject.instance()
+        proyecto.addMapLayer(layer, False)
+        proyecto.layerTreeRoot().insertLayer(0, layer)
 
         # TIGS 65: Archivo QML de respaldo
         exito = self._aplicar_estilo_por_estado(layer)  # Este es el estido definido en el código
         qml_path = os.path.join(os.path.dirname(__file__), "annotations_style.qml")  # Este es el QML de respaldo
 
-        if exito:                        # Si el estilo del código se aplica bien
-            layer.triggerRepaint()       # Lo usa
-        else:                            # Si no se aplica, carga el QML de respaldo
+        if exito:  # Si el estilo del código se aplica bien
+            layer.triggerRepaint()  # Lo usa
+        else:  # Si no se aplica, carga el QML de respaldo
             if os.path.exists(qml_path):
                 mensaje, exito_qml = layer.loadNamedStyle(qml_path)
                 if exito_qml:
@@ -172,16 +196,20 @@ class AnnotationManager:
             "memory",
         )
         provider = molde.dataProvider()
-        provider.addAttributes([
-            # pending, approved o rejected
-            QgsField("status", QVariant.String),
-            # 'human' (dibujado por el usuario) o 'ml' (importado del modelo)
-            QgsField("origin", QVariant.String),
-            # Fecha y hora del último cambio (ISO 8601 UTC).
-            QgsField("timestamp", QVariant.String),
-            # Score de confianza (solo aplica para origin='ml'; humano = NULL).
-            QgsField("score", QVariant.Double),
-        ])
+        provider.addAttributes(
+            [
+                # pending, approved o rejected
+                QgsField("status", _FIELD_STRING),
+                # 'human' (dibujado por el usuario) o 'ml' (importado del modelo)
+                QgsField("origin", _FIELD_STRING),
+                # Fecha y hora del último cambio (ISO 8601 UTC).
+                QgsField("timestamp", _FIELD_STRING),
+                # Score de confianza (solo aplica para origin='ml'; humano = NULL).
+                QgsField("score", _FIELD_DOUBLE),
+                # Notas del arqueólogo asociadas a este polígono
+                QgsField("notas", _FIELD_STRING),
+            ]
+        )
         molde.updateFields()
 
         # Escribir la capa vacía al .gpkg. Como el archivo no existe,
@@ -231,9 +259,7 @@ class AnnotationManager:
         feature.setAttribute("status", AnnotationState.PENDING.value)
         feature.setAttribute("origin", origin)
         feature.setAttribute("score", score)
-        feature.setAttribute(
-            "timestamp", datetime.now(timezone.utc).isoformat()
-        )
+        feature.setAttribute("timestamp", datetime.now(timezone.utc).isoformat())
 
         # addFeatures devuelve (ok, features_agregados); la 2ª contiene los
         # features con el fid ya asignado por el provider.
@@ -247,6 +273,32 @@ class AnnotationManager:
 
         # Devolver el feature ya con su fid asignado.
         return agregados[0] if agregados else feature
+
+    def agregar_desde_mascara(self, mask, confidence: float = None, transform=None) -> "QgsFeature":
+        # Convierte una máscara SAM a polígono y lo persiste como anotación.
+        # Recibe un array 2D devuelto por SAM (mask), un score de confianza del modelo (score)
+        # y un affine de rasterio para georreferenciar, si es None las coordenadas quedan en pixeles (transform)
+        # Devuelve  El QgsFeature creado con origin='ml-annotation' y status='pending'.
+        try:
+            from .mask_to_polygon import mask_to_geojson_polygon
+        except (ImportError, SystemError):
+            try:
+                from mask_to_polygon import mask_to_geojson_polygon
+            except ImportError:
+                mask_to_geojson_polygon = None
+
+        if mask_to_geojson_polygon is None:
+            raise ValueError("mask_to_polygon no está disponible en este entorno.")
+        # 1. Convertir máscara a GeoJSON
+        geojson_feature = mask_to_geojson_polygon(mask, transform=transform, origin="ml-annotation")
+
+        # 2. Extraer coordenadas del polígono GeoJSON y convertir a QgsGeometry
+        coords = geojson_feature["geometry"]["coordinates"][0]
+        puntos = [QgsPointXY(x, y) for x, y in coords]
+        geometry = QgsGeometry.fromPolygonXY([puntos])
+
+        # 3. Persistir usando el método existente
+        return self.agregar_anotacion(geometry, origin="ml-annotation", score=confidence)
 
     # ── TIGS-64: ciclo de vida (aprobar / rechazar) ────────────────────────
 
@@ -290,18 +342,53 @@ class AnnotationManager:
         idx_timestamp = self.layer.fields().indexFromName("timestamp")
         nuevo_ts = datetime.now(timezone.utc).isoformat()
 
-        ok = self.layer.dataProvider().changeAttributeValues({
-            feature_id: {
-                idx_status: nuevo_estado.value,
-                idx_timestamp: nuevo_ts,
+        ok = self.layer.dataProvider().changeAttributeValues(
+            {
+                feature_id: {
+                    idx_status: nuevo_estado.value,
+                    idx_timestamp: nuevo_ts,
+                }
             }
-        })
+        )
         if not ok:
             return False
 
         # Refrescar la visualización (los datos ya se persistieron en disco).
         self.layer.triggerRepaint()
         return True
+
+    # TIGS 69: asociar las notas a los polígonos ------------------------------------------------
+
+    # Guarda las notas del arqueólogo en el atributo "notas" del feature. Retorna True si se guardó correctamente.
+    def guardar_notas(self, feature_id: int, notas: str) -> bool:
+        feature = self.layer.getFeature(feature_id)
+        if not feature.isValid():
+            return False
+
+        idx_notas = self.layer.fields().indexFromName("notas")
+        ok = self.layer.dataProvider().changeAttributeValues(
+            {
+                feature_id: {
+                    idx_notas: notas,
+                }
+            }
+        )
+        if ok:
+            self.layer.triggerRepaint()
+        return ok
+
+    # Lee las notas guardadas de un feature. Retorna string vacío si no tiene.
+    def leer_notas(self, feature_id: int) -> str:
+        feature = self.layer.getFeature(feature_id)
+        if not feature.isValid():
+            return ""
+        notas = feature.attribute("notas")
+        # OJO: el provider OGR/GPKG devuelve NULL (un QVariant especial),
+        # no Python None, cuando el campo está vacío. Hay que cubrir ambos
+        # casos antes de pasar el valor a setText() del QLineEdit/QTextEdit.
+        if notas is None or notas == NULL:
+            return ""
+        return str(notas)
 
     # ── Estilo visual ──────────────────────────────────────────────────────
 
@@ -326,10 +413,74 @@ class AnnotationManager:
             r, g, b, a = color_for_state(estado)
             simbolo = QgsSymbol.defaultSymbol(QgsWkbTypes.PolygonGeometry)
             simbolo.setColor(QColor(r, g, b, a))
-            categorias.append(
-                QgsRendererCategory(estado.value, simbolo, estado.value)
-            )
+            categorias.append(QgsRendererCategory(estado.value, simbolo, estado.value))
 
         renderer = QgsCategorizedSymbolRenderer("status", categorias)
         layer.setRenderer(renderer)
         layer.triggerRepaint()
+
+    # ── Exportar ──────────────────────────────────────────────────────
+    def exportar_anotaciones_geojson(self, parent=None) -> str | None:
+        """Exporta todas las anotaciones con status='approved'
+        a un archivo GeoJSON estándar.
+
+        Cada feature incluye:
+            - geometría
+            - origin
+            - notas
+            - score
+            - timestamp"""
+
+        # 1. Pedir ruta destino al usuario
+        output_path, _ = QFileDialog.getSaveFileName(
+            parent,
+            "Exportar anotaciones",
+            "annotations.geojson",
+            "GeoJSON (*.geojson *.json)",
+        )
+
+        # Usuario canceló
+        if not output_path:
+            return None
+
+        # Asegurar extensión
+        if not output_path.endswith((".geojson", ".json")):
+            output_path += ".geojson"
+
+        # 2. Obtener solo annotations approved
+        approved_features = []
+
+        for feature in self.layer.getFeatures():
+            status = feature.attribute("status")
+
+            if status != AnnotationState.APPROVED.value:
+                continue
+
+            geom_json = json.loads(feature.geometry().asJson())
+
+            approved_features.append(
+                {
+                    "type": "Feature",
+                    "geometry": geom_json,
+                    "properties": {
+                        "origin": (None if feature.attribute("origin") == NULL else str(feature.attribute("origin"))),
+                        "notas": (None if feature.attribute("notas") == NULL else str(feature.attribute("notas"))),
+                        "score": (None if feature.attribute("score") == NULL else float(feature.attribute("score"))),
+                        "timestamp": (
+                            None if feature.attribute("timestamp") == NULL else str(feature.attribute("timestamp"))
+                        ),
+                    },
+                }
+            )
+
+        # 3. Construir FeatureCollection GeoJSON
+        geojson = {
+            "type": "FeatureCollection",
+            "features": approved_features,
+        }
+
+        # 4. Guardar archivo
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(geojson, f, ensure_ascii=False, indent=2)
+
+        return output_path

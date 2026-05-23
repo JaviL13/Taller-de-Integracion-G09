@@ -1,13 +1,13 @@
-''''algoritmo color ramp
- un módulo por algoritmo. Así la TIGS-37 (color ramp en el plugin) puede
- importar directamente este mismo archivo sin reescribir nada.
- El algoritmo es simple: toma una banda, la normaliza (percentiles 2-98) y
- le aplica una paleta de colores (viridis por defecto).
- La función apply_color_ramp retorna un array RGB uint8 listo para
- guardar como PNG o mostrar en QGIS.'''
+"""'algoritmo color ramp
+un módulo por algoritmo. Así la TIGS-37 (color ramp en el plugin) puede
+importar directamente este mismo archivo sin reescribir nada.
+El algoritmo es simple: toma una banda, la normaliza (percentiles 2-98) y
+le aplica una paleta de colores (viridis por defecto).
+La función apply_color_ramp retorna un array RGB uint8 listo para
+guardar como PNG o mostrar en QGIS."""
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def normalize(band):

@@ -1,24 +1,31 @@
+# el contenido dentro del archivo se ha ocupado IA para poder aplicar técnicas más
+# específicas y poder resolver errores de código que advertía la consola de qgis
 # para activar entorno virtual ejecutar dentro de backend
 # python -m venv venv
 # venv\Scripts\activate
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-import sys
-# valida automáticamente los datos que llegan al endpoint
-from pydantic import BaseModel, field_validator
-# para generar el timestamp de la respuesta
-from datetime import datetime
-import time
-from typing import Optional
-import json
 import base64
 import io
+import json
+import sys
+
+# para generar el timestamp de la respuesta
+import time
 from contextlib import asynccontextmanager
+
+# para generar el timestamp de la respuesta
+from datetime import datetime
+from typing import Optional
+
+import numpy as np
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from PIL import Image, UnidentifiedImageError
+
+# valida automáticamente los datos que llegan al endpoint
+from pydantic import BaseModel, field_validator
 
 # Importar el wrapper de SAM
 from sam_wrapper import initialize_sam, run_sam
-import numpy as np
-from PIL import Image, UnidentifiedImageError
 
 # ── Startup del servidor: cargar el modelo SAM UNA SOLA VEZ ────────────
 
@@ -48,15 +55,14 @@ app = FastAPI(lifespan=lifespan)  # crea el servidor
 def health():
     return {  # fastapi automáticamente lo convierte a json
         "status": "ok",
-        "version": "1.0"
+        "version": "1.0",
     }
 
 
 @app.get("/info")  # url, segundo endpoint
 def info():
-    return {
-        "python_version": sys.version
-    }
+    return {"python_version": sys.version}
+
 
 # Define qué datos debe enviar el plugin al servidor para solicitar un realce
 
@@ -64,15 +70,14 @@ def info():
 class EnhanceRequest(BaseModel):
     # lista de 4 números que representan las coordenadas
     bbox: list[float]
-    band: int                                   # número de banda a procesar
+    band: int  # número de banda a procesar
 
     # Hay que verificar que bbox tenga exactamente 4 coordenadas
     # Si no, FastAPI responde automáticamente con error 422
-    @field_validator('bbox')
+    @field_validator("bbox")
     def bbox_debe_tener_4_valores(cls, v):
         if len(v) != 4:
-            raise ValueError(
-                'bbox debe tener exactamente 4 valores: [x1, y1, x2, y2]')
+            raise ValueError("bbox debe tener exactamente 4 valores: [x1, y1, x2, y2]")
         return v
 
 
@@ -92,7 +97,7 @@ def enhance(request: EnhanceRequest):
         "status": "ok",
         "region_received": request.bbox,
         "timestamp": timestamp,
-        "processing_time_ms": round(processing_time_ms, 2)
+        "processing_time_ms": round(processing_time_ms, 2),
     }
 
 
@@ -116,11 +121,13 @@ def enhance(request: EnhanceRequest):
 
 class InferResponse(BaseModel):
     """Respuesta del endpoint /infer con máscara y confianza."""
+
     status: str
     mask_b64: str  # Máscara PNG en base64
     confidence: float
     width: int
     height: int
+    processing_time_ms: float
 
 
 @app.post("/infer", response_model=InferResponse)
@@ -138,7 +145,7 @@ async def infer(
         labels: JSON string con array de labels [1, 1, ...] o None
                 Si no se pasa, todos los puntos son foreground (1)
     """
-    # inicio = time.time()
+    inicio = time.time()
 
     # 1. Leer imagen del upload
     image_data = await image.read()
@@ -149,8 +156,8 @@ async def infer(
         raise HTTPException(status_code=400, detail="Archivo de imagen inválido")
 
     # Asegurar que es RGB (convertir si es RGBA, escala de grises, etc.)
-    if image_pil.mode != 'RGB':
-        image_pil = image_pil.convert('RGB')
+    if image_pil.mode != "RGB":
+        image_pil = image_pil.convert("RGB")
 
     image_array = np.array(image_pil)  # (H, W, 3)
     height, width = image_array.shape[:2]
@@ -182,12 +189,13 @@ async def infer(
         raise HTTPException(status_code=500, detail=f"Error de inferencia: {type(e).__name__}: {str(e)[:200]}")
 
     # 4. Codificar máscara a PNG base64
-    mask_pil = Image.fromarray(mask, mode='L')  # Máscara grayscale
+    mask_pil = Image.fromarray(mask, mode="L")  # Máscara grayscale
     mask_bytes = io.BytesIO()
-    mask_pil.save(mask_bytes, format='PNG')
-    mask_b64 = base64.b64encode(mask_bytes.getvalue()).decode('utf-8')
+    mask_pil.save(mask_bytes, format="PNG")
+    mask_b64 = base64.b64encode(mask_bytes.getvalue()).decode("utf-8")
 
     # 5. Armar respuesta
+    processing_time_ms = (time.time() - inicio) * 1000
 
     return {
         "status": "ok",
@@ -195,6 +203,7 @@ async def infer(
         "confidence": float(confidence),
         "width": width,
         "height": height,
+        "processing_time_ms": processing_time_ms,
     }
 
 
@@ -202,8 +211,8 @@ async def infer(
 # instalar dependencias: pip install -r requirements.txt
 # Ejecutar: uvicorn main:app --reload
 # debería poder abrir
-# http://localhost:8000/health
-# http://localhost:8000/info
-# http://localhost:8000/enhance
-# http://localhost:8000/infer
-# En http://localhost:8000/docs se pueden revisar todos los endpoints
+# http://127.0.0.1:8000/health
+# http://127.0.0.1:8000/info
+# http://127.0.0.1:8000/enhance
+# http://127.0.0.1:8000/infer
+# En http://127.0.0.1:8000/docs se pueden revisar todos los endpoints

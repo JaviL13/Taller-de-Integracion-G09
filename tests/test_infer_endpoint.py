@@ -1,3 +1,5 @@
+# el contenido dentro del archivo se ha ocupado IA para poder crear tests más
+# robustos y claros y poder testear escenarios difíciles
 # -*- coding: utf-8 -*-
 """Tests del endpoint POST /infer (TIGS-70).
 
@@ -24,7 +26,6 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Setup de imports
 # ---------------------------------------------------------------------------
@@ -38,6 +39,10 @@ sys.path.insert(0, BACKEND_DIR)
 
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
+# sam_wrapper importa torch, que es muy pesado para instalar en CI. Si no
+# está disponible, saltar todo el módulo de tests (no se pueden ejecutar
+# sin tener el modelo SAM cargado de todas formas).
+pytest.importorskip("torch")
 from fastapi.testclient import TestClient  # noqa: E402
 
 # Mockear initialize_sam ANTES de importar app, para que no intente
@@ -49,6 +54,7 @@ with patch("sam_wrapper.initialize_sam"):
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def client():
@@ -70,9 +76,10 @@ def synthetic_image_png():
 
     # Convertir a PIL Image y guardar como PNG
     from PIL import Image
-    img = Image.fromarray(image_array, mode='RGB')
+
+    img = Image.fromarray(image_array, mode="RGB")
     png_bytes = io.BytesIO()
-    img.save(png_bytes, format='PNG')
+    img.save(png_bytes, format="PNG")
     png_bytes.seek(0)
     return png_bytes.getvalue()
 
@@ -97,6 +104,7 @@ def synthetic_mask_and_confidence():
 # ---------------------------------------------------------------------------
 # Tests para TIGS-70
 # ---------------------------------------------------------------------------
+
 
 def test_health(client):
     """GET /health retorna 200 y {"status": "ok"}."""
@@ -160,8 +168,9 @@ def test_infer_returns_mask(client, synthetic_image_png, synthetic_mask_and_conf
             mask_bytes = base64.b64decode(mask_b64)
             # Intentar abrir como imagen para verificar que es PNG válido
             from PIL import Image
+
             decoded_mask = Image.open(io.BytesIO(mask_bytes))
-            assert decoded_mask.format == 'PNG'
+            assert decoded_mask.format == "PNG"
             # Convertir a array para validar que tiene forma correcta
             mask_array = np.array(decoded_mask)
             assert mask_array.shape == (256, 256)  # Grayscale

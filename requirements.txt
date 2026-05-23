@@ -1,8 +1,10 @@
-flake8
+ruff
 pylint
 pytest
 pytest-cov
+pre-commit
 rasterio
 numpy
 fastapi
 httpx
+shapely

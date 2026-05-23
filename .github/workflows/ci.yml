@@ -26,10 +26,13 @@ jobs:
 
       - name: Install lint dependencies
         run: |
-          pip install flake8 pylint
+          pip install ruff pylint
 
-      - name: Run flake8
-        run: flake8 . --max-line-length=120 --exclude=.git,__pycache__,*.egg-info --extend-ignore=W191,E101,E117
+      - name: Run ruff check
+        run: ruff check .
+
+      - name: Run ruff format check
+        run: ruff format --check .
 
       - name: Run pylint
         run: pylint **/*.py --disable=C0114,C0115,C0116 || true

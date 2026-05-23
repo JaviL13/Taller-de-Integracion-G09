@@ -1,3 +1,5 @@
+# el contenido dentro del archivo se ha ocupado IA para poder crear tests más
+# robustos y claros y poder testear escenarios difíciles
 # -*- coding: utf-8 -*-
 """Tests del módulo annotation_state (TIGS-64).
 
@@ -11,6 +13,7 @@ Cubren:
     StateTransitionError en las inválidas.
   - color_for_state: devuelve la tupla RGBA esperada para cada estado.
 """
+
 import os
 import sys
 
@@ -28,8 +31,8 @@ from annotation_state import (  # noqa: E402
     validate_transition,
 )
 
-
 # ── Integridad del enum ───────────────────────────────────────────────────
+
 
 def test_enum_tiene_los_tres_estados_esperados():
     """El enum debe tener exactamente PENDING, APPROVED, REJECTED."""
@@ -45,6 +48,7 @@ def test_enum_hereda_de_str():
 
 
 # ── parse_state ───────────────────────────────────────────────────────────
+
 
 def test_parse_state_acepta_string_valido():
     assert parse_state("pending") is AnnotationState.PENDING
@@ -74,6 +78,7 @@ def test_parse_state_rechaza_none():
 
 # ── validate_transition: transiciones válidas ───────────────────────────
 
+
 @pytest.mark.parametrize(
     "origen,destino",
     [
@@ -85,9 +90,7 @@ def test_parse_state_rechaza_none():
         (AnnotationState.REJECTED, AnnotationState.PENDING),
     ],
 )
-def test_validate_transition_acepta_transiciones_entre_estados_distintos(
-    origen, destino
-):
+def test_validate_transition_acepta_transiciones_entre_estados_distintos(origen, destino):
     """Cualquier transición entre estados DISTINTOS debe ser permitida."""
     # No debe lanzar nada.
     validate_transition(origen, destino)
@@ -100,6 +103,7 @@ def test_validate_transition_acepta_strings_crudos():
 
 
 # ── validate_transition: transiciones inválidas (estado→sí mismo) ────────
+
 
 @pytest.mark.parametrize(
     "estado",
@@ -119,6 +123,7 @@ def test_state_transition_error_es_subclase_de_value_error():
 
 
 # ── color_for_state ──────────────────────────────────────────────────────
+
 
 def test_color_for_state_devuelve_tupla_rgba_para_cada_estado():
     """Cada estado debe tener un color RGBA distinto."""
