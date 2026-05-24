@@ -165,6 +165,11 @@ class GeoGlyphPanel(QDockWidget):
         layout.addWidget(self.lbl_confianza)
 
         # Campo de texto libre para observaciones
+        layout.addWidget(QLabel("Estado:"))
+        self.combo_estado = QComboBox()
+        self.combo_estado.addItems(["pending", "approved", "rejected"])
+        self.combo_estado.setEnabled(False)
+        layout.addWidget(self.combo_estado)
         self.input_notas = QLineEdit()
         self.input_notas.setPlaceholderText("Notas ...")
         layout.addWidget(self.input_notas)
