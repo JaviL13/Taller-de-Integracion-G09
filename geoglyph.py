@@ -73,6 +73,8 @@ class GeoGlyph:
         self._roi_tool = None  # TIGS-53: herramienta de ROI rectangular
         self._infer_worker = None  # TIGS-53: worker async aiohttp para /infer
         self._sam_worker = None  # TIGS-70: worker para ejecutar SAM real
+        self._roi_rect = None  # QgsRectangle del ROI activo (pendiente de inferencia)
+        self._roi_image_array = None  # np.ndarray extraído del ROI activo
         # Guard para evitar recursión infinita cuando reescribimos el proyecto
         # tras migrar el GPKG temporal a la carpeta del proyecto guardado.
         self._suppress_save_handler = False
@@ -119,7 +121,7 @@ class GeoGlyph:
         # Conexiones de botones
         self.panel.btn_abrir_tiff.clicked.connect(self.abrir_geotiff)
         self.panel.btn_exportar.clicked.connect(self.exportar_capa_realzada)
-        self.panel.btn_inferencia.clicked.connect(self._ejecutar_inferencia)  # ← nuevo
+        self.panel.btn_ejecutar_sam.clicked.connect(self._ejecutar_sam)
         self.panel.btn_infer.clicked.connect(self._ejecutar_infer)  # boton de renderizar
 
         # Conectar el boton "Aplicar Realce" del panel
@@ -541,7 +543,7 @@ class GeoGlyph:
             )
             return
 
-        self.panel.btn_inferencia.setEnabled(False)
+        self.panel.btn_ejecutar_sam.setEnabled(False)
         self.panel.lbl_status.setText("Estado: Conectando con backend...")
         self.panel.lbl_status.setStyleSheet("color: orange; font-size: 10px; margin-left: 4px;")
 
@@ -557,7 +559,7 @@ class GeoGlyph:
         proc_ms = body.get("processing_time_ms", "—")
         self.panel.lbl_status.setText(f"Estado: HTTP {status_code} · {elapsed:.2f}s · backend: {proc_ms}ms")
         self.panel.lbl_status.setStyleSheet("color: green; font-size: 10px; margin-left: 4px;")
-        self.panel.btn_inferencia.setEnabled(False)
+        self.panel.btn_ejecutar_sam.setEnabled(False)
 
         # TIGS 57 - Lógica para devolver el score de confianza ─────────────────────────────
         detecciones = body.get("detections", [])  # Esta es la lista de detecciones del backend
@@ -579,7 +581,7 @@ class GeoGlyph:
         """Callback ejecutado en el hilo principal cuando el worker falla."""
         self.panel.lbl_status.setText(f"Error: {msg}")
         self.panel.lbl_status.setStyleSheet("color: red; font-size: 10px; margin-left: 4px;")
-        self.panel.btn_inferencia.setEnabled(False)
+        self.panel.btn_ejecutar_sam.setEnabled(False)
 
     def _get_or_create_annotation_manager(self):
         """Lazy-init del AnnotationManager.
@@ -814,6 +816,40 @@ class GeoGlyph:
             duration=5,
         )
 
+    def _ejecutar_sam(self):
+        """Ejecuta SAM manualmente sobre el ROI activo.
+
+        Habilitado solo cuando hay un ROI seleccionado. Si SAM ya está
+        corriendo, el botón estará deshabilitado y este método no se invoca.
+        """
+        if self._roi_image_array is None:
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                "Selecciona un ROI primero antes de ejecutar SAM.",
+                level=1,
+                duration=3,
+            )
+            return
+
+        if self._sam_worker is not None and self._sam_worker.isRunning():
+            return
+
+        self.panel.btn_ejecutar_sam.setEnabled(False)
+        self.panel.lbl_status.setText(
+            f"Estado: Procesando con SAM ({self._roi_image_array.shape[1]}x{self._roi_image_array.shape[0]}px)..."
+        )
+        self.panel.lbl_status.setStyleSheet("color: black; font-size: 10px; margin-left: 4px;")
+
+        self._sam_worker = SamWorker(
+            image=self._roi_image_array,
+            url="http://127.0.0.1:8000",
+            points=None,
+            labels=None,
+        )
+        self._sam_worker.finished.connect(self._on_sam_finished)
+        self._sam_worker.error.connect(self._on_sam_error)
+        self._sam_worker.start()
+
     def _on_roi_seleccionado(self, rect):
         """Callback que recibe el QgsRectangle seleccionado por el usuario (TIGS-70).
 
@@ -862,29 +898,15 @@ class GeoGlyph:
             self.panel.btn_roi.setEnabled(True)  # Rehabilitar botón, no se inició nueva inferencia
             return
 
-        # 3. Mantener el botón deshabilitado durante la inferencia y mostrar "Procesando con SAM..."
-        # El botón ya fue deshabilitado en _activar_herramienta_roi() y se mantendrá deshabilitado
-        # hasta que termine la inferencia en _on_sam_finished() o _on_sam_error()
+        # 3. Guardar el ROI activo y habilitar el botón de ejecución manual de SAM
+        self._roi_rect = rect
+        self._roi_image_array = image_array
         self.panel.lbl_status.setText(
-            f"Estado: Procesando con SAM ({image_array.shape[1]}x{image_array.shape[0]}px)..."
+            f"Estado: ROI seleccionado ({image_array.shape[1]}x{image_array.shape[0]}px) — aplica realces o ejecuta SAM"
         )
-        self.panel.lbl_status.setStyleSheet("color: black; font-size: 10px; margin-left: 4px;")
-
-        # 4. Lanzar SamWorker con la imagen (URL base configurable, default localhost)
-        # TODO: hacer la URL configurable desde un panel de configuración
-        self._sam_worker = SamWorker(
-            image=image_array,
-            url="http://localhost:8000",
-            points=None,  # Por ahora sin puntos de refinamiento
-            labels=None,
-        )
-        self._sam_worker.finished.connect(self._on_sam_finished)
-        self._sam_worker.error.connect(self._on_sam_error)
-
-        # Bloquear btn_inferencia mientras hay una inferencia SAM en curso
-        self.panel.btn_inferencia.setEnabled(False)
-
-        self._sam_worker.start()
+        self.panel.lbl_status.setStyleSheet("color: blue; font-size: 10px; margin-left: 4px;")
+        self.panel.btn_ejecutar_sam.setEnabled(True)
+        self.panel.btn_roi.setEnabled(True)
 
     def _on_infer_ok(self, status_code, elapsed, body):
         """Callback ejecutado en el hilo principal cuando /infer responde OK.
@@ -964,9 +986,9 @@ class GeoGlyph:
         if self.panel is None:
             return
 
-        # Habilitar los botones de ROI e inferencia
+        # ROI sigue activo: el usuario puede volver a ejecutar SAM (con otro realce, por ejemplo)
         self.panel.btn_roi.setEnabled(True)
-        self.panel.btn_inferencia.setEnabled(False)
+        self.panel.btn_ejecutar_sam.setEnabled(self._roi_image_array is not None)
 
         # Actualizar el score de confianza en el panel (reemplazando el 87% hardcodeado)
         self.panel.lbl_score.setText(f"Confianza: {confidence * 100:.1f}%")
@@ -1019,9 +1041,9 @@ class GeoGlyph:
         if self.panel is None:
             return
 
-        # Habilitar los botones de ROI e inferencia para que el usuario pueda reintentar
+        # ROI sigue activo: el usuario puede reintentar SAM tras corregir el error
         self.panel.btn_roi.setEnabled(True)
-        self.panel.btn_inferencia.setEnabled(False)
+        self.panel.btn_ejecutar_sam.setEnabled(self._roi_image_array is not None)
 
         # Mostrar error en el panel
         self.panel.lbl_status.setText(f"Error SAM: {msg}")

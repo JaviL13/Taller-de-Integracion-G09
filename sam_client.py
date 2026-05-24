@@ -50,7 +50,7 @@ class SamWorker(QThread):
 
     Args:
         image: np.ndarray de forma (H, W, 3) en [0, 255] (uint8) o [0, 1] (float).
-        url: URL base del backend (p.ej. "http://localhost:8000").
+        url: URL base del backend (p.ej. "http://127.0.0.1:8000").
         points: opcional, array de puntos [[x1, y1], ...] para refinamiento.
         labels: opcional, array de labels [1, 1, ...].
         parent: parent Qt (opcional).
@@ -66,7 +66,7 @@ class SamWorker(QThread):
     def __init__(
         self,
         image: np.ndarray,
-        url: str = "http://localhost:8000",
+        url: str = "http://127.0.0.1:8000",
         points: Optional[list] = None,
         labels: Optional[list] = None,
         parent=None,

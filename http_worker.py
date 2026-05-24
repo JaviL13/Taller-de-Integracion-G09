@@ -27,7 +27,7 @@ class EnhanceWorker(QThread):
 
     TIMEOUT_SECONDS = 30
 
-    def __init__(self, base_url="http://localhost:8000", bbox=None, band=1, parent=None):
+    def __init__(self, base_url="http://127.0.0.1:8000", bbox=None, band=1, parent=None):
         super().__init__(parent)
         self.url = f"{base_url}/infer"
         self.payload = {
