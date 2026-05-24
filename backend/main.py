@@ -211,8 +211,8 @@ async def infer(
 # instalar dependencias: pip install -r requirements.txt
 # Ejecutar: uvicorn main:app --reload
 # debería poder abrir
-# http://localhost:8000/health
-# http://localhost:8000/info
-# http://localhost:8000/enhance
-# http://localhost:8000/infer
-# En http://localhost:8000/docs se pueden revisar todos los endpoints
+# http://127.0.0.1:8000/health
+# http://127.0.0.1:8000/info
+# http://127.0.0.1:8000/enhance
+# http://127.0.0.1:8000/infer
+# En http://127.0.0.1:8000/docs se pueden revisar todos los endpoints

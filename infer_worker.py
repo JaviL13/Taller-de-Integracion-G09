@@ -60,7 +60,7 @@ class InferWorker(QThread):
         bbox,
         image_path=None,
         crs_epsg=None,
-        base_url="http://localhost:8000",
+        base_url="http://127.0.0.1:8000",
         parent=None,
     ):
         super().__init__(parent)

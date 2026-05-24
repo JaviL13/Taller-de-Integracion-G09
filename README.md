@@ -207,16 +207,16 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Endpoints útiles:
-- Health: `http://localhost:8000/health`
-- Info: `http://localhost:8000/info`
-- API docs: `http://localhost:8000/docs`
+- Health: `http://127.0.0.1:8000/health`
+- Info: `http://127.0.0.1:8000/info`
+- API docs: `http://127.0.0.1:8000/docs`
 
 6) Prueba rápida del endpoint `/infer`
 
 Ejemplo con `curl` (envía una imagen PNG y recibe la máscara en base64):
 
 ```bash
-curl -X POST "http://localhost:8000/infer" -F "image=@/ruta/a/tu/roi.png" -s | jq .
+curl -X POST "http://127.0.0.1:8000/infer" -F "image=@/ruta/a/tu/roi.png" -s | jq .
 ```
 
 7) Dependencias en el entorno de QGIS
@@ -228,7 +228,7 @@ Problemas comunes y notas de sistema
 - En macOS con chips Apple Silicon (M1/M2), use Python y ruedas compatibles; consulte la documentación de PyTorch y OpenCV para builds en ARM.
 - Si desea usar GPU, asegúrese de que los drivers NVIDIA y la versión de CUDA instalados en el sistema coincidan con la rueda de PyTorch que instale.
 
-En el panel del plugin, configure la URL del servidor: `http://localhost:8000`.
+En el panel del plugin, configure la URL del servidor: `http://127.0.0.1:8000`.
 
 > Si el servidor no está disponible, el plugin mantiene todas sus funcionalidades de visualización, importación y anotación manual sin degradar el flujo principal.
 
