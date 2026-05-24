@@ -244,8 +244,8 @@ def test_sam_finished_llama_startEditing():
     ann_layer.startEditing.assert_called_once()
 
 
-def test_sam_finished_no_llama_startEditing_si_ya_editable():
-    """Si la capa ya está en modo edición, no debe llamar startEditing de nuevo."""
+def test_sam_finished_no_deja_seleccion_activa():
+    """Las recomendaciones no deben quedarse como selección resaltada."""
     plugin = _make_plugin()
     plugin._roi_transform = from_bounds(0, 0, 64, 64, 64, 64)
 
@@ -257,11 +257,11 @@ def test_sam_finished_no_llama_startEditing_si_ya_editable():
     with patch.object(plugin, "_get_or_create_annotation_manager", return_value=mock_manager):
         plugin._on_sam_finished(_mask(), 0.80)
 
-    ann_layer.startEditing.assert_not_called()
+    ann_layer.removeSelection.assert_called_once()
 
 
-def test_sam_finished_activa_herramienta_de_vertices():
-    """Tras agregar el polígono, debe activarse la herramienta de vértices."""
+def test_sam_finished_refresca_lienzo_y_zoom():
+    """La recomendación debe quedar visible en el canvas como un polígono normal."""
     plugin = _make_plugin()
     plugin._roi_transform = from_bounds(0, 0, 64, 64, 64, 64)
 
@@ -269,11 +269,16 @@ def test_sam_finished_activa_herramienta_de_vertices():
     ann_layer.isEditable.return_value = False
     mock_manager = MagicMock()
     mock_manager.layer = ann_layer
+    feature = MagicMock()
+    feature.isValid.return_value = True
+    feature.id.return_value = 1
+    mock_manager.agregar_desde_mascara.return_value = feature
 
     with patch.object(plugin, "_get_or_create_annotation_manager", return_value=mock_manager):
         plugin._on_sam_finished(_mask(), 0.80)
 
-    plugin.iface.actionVertexTool().trigger.assert_called()
+    plugin.iface.mapCanvas().zoomToFeatureIds.assert_called_with(ann_layer, [1])
+    plugin.iface.mapCanvas().refresh.assert_called_once()
 
 
 # ── Tests: error en agregar_desde_mascara ────────────────────────────────────
@@ -294,3 +299,52 @@ def test_sam_finished_no_activa_edicion_si_agregar_falla():
 
     ann_layer.startEditing.assert_not_called()
     plugin.iface.actionVertexTool().trigger.assert_not_called()
+
+
+# ── Tests: flujo de inferencia / recomendaciones ────────────────────────────
+
+
+def test_infer_ok_activa_y_selecciona_recomendaciones():
+    """Las recomendaciones automáticas deben quedar visibles y editables."""
+    plugin = _make_plugin()
+
+    ann_layer = MagicMock()
+    ann_layer.isEditable.return_value = False
+    mock_manager = MagicMock()
+    mock_manager.layer = ann_layer
+
+    feature = MagicMock()
+    feature.isValid.return_value = True
+    feature.id.return_value = 42
+    mock_manager.agregar_anotacion.return_value = feature
+
+    detections = [
+        {
+            "polygon": [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            "confidence": 0.91,
+        }
+    ]
+
+    with patch.object(plugin, "_get_or_create_annotation_manager", return_value=mock_manager):
+        plugin._on_infer_ok(200, 1.25, {"detections": detections, "model_version": "test"})
+
+    mock_manager.agregar_anotacion.assert_called_once()
+    plugin.iface.setActiveLayer.assert_called_with(ann_layer)
+    ann_layer.startEditing.assert_called_once()
+    ann_layer.removeSelection.assert_called_once()
+    plugin.iface.mapCanvas().zoomToFeatureIds.assert_called_with(ann_layer, [42])
+    plugin.iface.mapCanvas().refresh.assert_called_once()
+
+
+def test_infer_ok_sin_detecciones_no_activa_edicion():
+    """Si no hay recomendaciones, no debe tocar la edición de anotaciones."""
+    plugin = _make_plugin()
+    mock_manager = MagicMock()
+    mock_manager.layer = MagicMock()
+
+    with patch.object(plugin, "_get_or_create_annotation_manager", return_value=mock_manager):
+        plugin._on_infer_ok(200, 0.5, {"detections": [], "model_version": "test"})
+
+    mock_manager.agregar_anotacion.assert_not_called()
+    mock_manager.layer.selectByIds.assert_not_called()
+    mock_manager.layer.startEditing.assert_not_called()

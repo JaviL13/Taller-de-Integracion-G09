@@ -852,6 +852,19 @@ class GeoGlyph:
         self._sam_worker.error.connect(self._on_sam_error)
         self._sam_worker.start()
 
+    def _activar_edicion_anotaciones(self, manager, feature_ids):
+        """Deja la capa de anotaciones activa, visible y lista para edición."""
+        if self.panel is None or manager is None or not feature_ids:
+            return
+
+        ann_layer = manager.layer
+        self.iface.setActiveLayer(ann_layer)
+        if not ann_layer.isEditable():
+            ann_layer.startEditing()
+        ann_layer.removeSelection()
+        self.iface.mapCanvas().zoomToFeatureIds(ann_layer, feature_ids)
+        self.iface.mapCanvas().refresh()
+
     def _on_roi_seleccionado(self, rect):
         """Callback que recibe el QgsRectangle seleccionado por el usuario (TIGS-70).
 
@@ -937,12 +950,17 @@ class GeoGlyph:
         self.panel.lbl_score.setText(f"Confianza: {primer_score:.0%}" if detections else "Confianza: sin detecciones")
         # Convertir polígonos del backend a anotaciones en QGIS
         manager = self._get_or_create_annotation_manager()
+        fids_nuevos = []
         for det in detections:
             puntos = [QgsPointXY(p[0], p[1]) for p in det.get("polygon", [])]
             if len(puntos) < 3:
                 continue
             geometry = QgsGeometry.fromPolygonXY([puntos])
-            manager.agregar_anotacion(geometry, origin="ml", score=det.get("confidence"))
+            feature = manager.agregar_anotacion(geometry, origin="ml", score=det.get("confidence"))
+            if feature.isValid():
+                fids_nuevos.append(feature.id())
+
+        self._activar_edicion_anotaciones(manager, fids_nuevos)
 
     def _on_infer_error(self, msg):
         """Callback de error del worker /infer.
@@ -988,9 +1006,11 @@ class GeoGlyph:
         if self.panel is None:
             return
 
+        roi_image_array = getattr(self, "_roi_image_array", None)
+
         # ROI sigue activo: el usuario puede volver a ejecutar SAM (con otro realce, por ejemplo)
         self.panel.btn_roi.setEnabled(True)
-        self.panel.btn_ejecutar_sam.setEnabled(self._roi_image_array is not None)
+        self.panel.btn_ejecutar_sam.setEnabled(roi_image_array is not None)
 
         # Actualizar el score de confianza en el panel (reemplazando el 87% hardcodeado)
         self.panel.lbl_score.setText(f"Confianza: {confidence * 100:.1f}%")
@@ -1014,19 +1034,18 @@ class GeoGlyph:
         # TIGS-71/97: convertir máscara a polígono georreferenciado y guardarlo como anotación
         manager = self._get_or_create_annotation_manager()
         try:
-            manager.agregar_desde_mascara(mask, confidence=confidence, transform=self._roi_transform)
+            feature = manager.agregar_desde_mascara(
+                mask,
+                confidence=confidence,
+                transform=getattr(self, "_roi_transform", None),
+            )
             self.iface.messageBar().pushMessage(
                 "GeoGlyph",
                 f"Segmentación guardada — origen: ml-annotation | confianza: {confidence * 100:.1f}%",
                 level=0,
                 duration=3,
             )
-            # TIGS-97: activar edición de vértices sobre la capa de anotaciones
-            ann_layer = manager.layer
-            self.iface.setActiveLayer(ann_layer)
-            if not ann_layer.isEditable():
-                ann_layer.startEditing()
-            self.iface.actionVertexTool().trigger()
+            self._activar_edicion_anotaciones(manager, [feature.id()] if feature.isValid() else [])
         except ValueError as e:
             self.iface.messageBar().pushMessage(
                 "GeoGlyph",
