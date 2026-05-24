@@ -32,6 +32,7 @@ from qgis.core import QgsGeometry, QgsPointXY, QgsRasterLayer
 from qgis.PyQt.QtCore import QCoreApplication, QSettings, Qt, QTranslator
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QTableWidgetItem
+from rasterio.transform import from_bounds
 
 from .annotation_manager import AnnotationManager
 from .annotation_state import StateTransitionError  # ← TIGS-64
@@ -73,6 +74,7 @@ class GeoGlyph:
         self._roi_tool = None  # TIGS-53: herramienta de ROI rectangular
         self._infer_worker = None  # TIGS-53: worker async aiohttp para /infer
         self._sam_worker = None  # TIGS-70: worker para ejecutar SAM real
+        self._roi_transform = None  # TIGS-97: Affine georreferenciado del ROI activo
         # Guard para evitar recursión infinita cuando reescribimos el proyecto
         # tras migrar el GPKG temporal a la carpeta del proyecto guardado.
         self._suppress_save_handler = False
@@ -835,9 +837,9 @@ class GeoGlyph:
         # o la capa no es válida, el helper levanta ValueError → se avisa
         # al usuario y se aborta.
         try:
-            # El valor de retorno no se usa: solo nos importa el efecto
-            # secundario (que lance ValueError si la ROI cae fuera del raster).
-            extract_raster_crop(layer, rect)
+            crop = extract_raster_crop(layer, rect)
+            xmin, ymin, xmax, ymax = crop["bbox"]
+            self._roi_transform = from_bounds(xmin, ymin, xmax, ymax, crop["pixels_w"], crop["pixels_h"])
         except ValueError as e:
             self.iface.messageBar().pushMessage("GeoGlyph", str(e), level=1, duration=4)
             self.panel.btn_roi.setEnabled(True)  # Rehabilitar botón en error
@@ -987,16 +989,22 @@ class GeoGlyph:
             level=Qgis.Info,
         )
 
-        # TIGS-71: convertir máscara a polígono y guardarlo como anotación
+        # TIGS-71/97: convertir máscara a polígono georreferenciado y guardarlo como anotación
         manager = self._get_or_create_annotation_manager()
         try:
-            manager.agregar_desde_mascara(mask, confidence=confidence)
+            manager.agregar_desde_mascara(mask, confidence=confidence, transform=self._roi_transform)
             self.iface.messageBar().pushMessage(
                 "GeoGlyph",
                 f"Segmentación guardada — origen: ml-annotation | confianza: {confidence * 100:.1f}%",
                 level=0,
                 duration=3,
             )
+            # TIGS-97: activar edición de vértices sobre la capa de anotaciones
+            ann_layer = manager.layer
+            self.iface.setActiveLayer(ann_layer)
+            if not ann_layer.isEditable():
+                ann_layer.startEditing()
+            self.iface.actionVertexTool().trigger()
         except ValueError as e:
             self.iface.messageBar().pushMessage(
                 "GeoGlyph",
