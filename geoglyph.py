@@ -887,12 +887,15 @@ class GeoGlyph:
         # al usuario y se aborta.
         try:
             crop = extract_raster_crop(layer, rect)
-            xmin, ymin, xmax, ymax = crop["bbox"]
-            self._roi_transform = from_bounds(xmin, ymin, xmax, ymax, crop["pixels_w"], crop["pixels_h"])
         except ValueError as e:
             self.iface.messageBar().pushMessage("GeoGlyph", str(e), level=1, duration=4)
             self.panel.btn_roi.setEnabled(True)  # Rehabilitar botón en error
             return
+
+        self._roi_transform = None
+        if crop is not None:
+            xmin, ymin, xmax, ymax = crop["bbox"]
+            self._roi_transform = from_bounds(xmin, ymin, xmax, ymax, crop["pixels_w"], crop["pixels_h"])
 
         # 2. Extraer los píxeles de la imagen (TIGS-70)
         try:
