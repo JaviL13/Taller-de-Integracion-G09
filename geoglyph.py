@@ -137,10 +137,13 @@ class GeoGlyph:
 
         # TIGS-53: botón para seleccionar un ROI rectangular y enviarlo al backend
         self.panel.btn_roi.clicked.connect(self._activar_herramienta_roi)
-        # ── TIGS-64: botones aprobar / rechazar ──────────────────────────
+        # ── TIGS-64: botones aprobar / rechazar / pendiente ──────────────
         self.panel.btn_aprobar.clicked.connect(self._aprobar_seleccion)
         self.panel.btn_rechazar.clicked.connect(self._rechazar_seleccion)
-        self.panel.combo_estado.currentTextChanged.connect(self._on_estado_cambiado)
+        self.panel.btn_pendiente.clicked.connect(self._pendiente_seleccion)
+
+        # ── TIGS-87: historial de notas ───────────────────────────────────
+        self.panel.btn_agregar_nota.clicked.connect(self._on_agregar_nota)
 
         # Botón para exportar anotaciones
         self.panel.btn_exportar_geojson.clicked.connect(self.exportar_anotaciones_geojson)
@@ -1103,6 +1106,53 @@ class GeoGlyph:
             duration=5,
         )
 
+    # ── TIGS-87: historial de notas ────────────────────────────────────────
+
+    def _actualizar_historial_notas(self, annotation_id: int) -> None:
+        """Carga el historial de notas del feature en la tabla del panel.
+
+        Limpia la tabla antes de rellenarla y desplaza la vista al final
+        (nota más reciente) para que el arqueólogo la vea sin hacer scroll.
+        """
+        if self._annotation_manager is None:
+            return
+        tabla = self.panel.table_historial_notas
+        historial = self._annotation_manager.leer_historial_notas(annotation_id)
+        tabla.setRowCount(0)
+        for nota in historial:
+            row = tabla.rowCount()
+            tabla.insertRow(row)
+            # Fecha: recortar la parte de microsegundos y reemplazar 'T' por espacio
+            ts = nota["timestamp"]
+            ts_corto = ts[:19].replace("T", " ") if ts else ""
+            score = nota.get("score")
+            score_txt = f"{float(score):.2f}" if score is not None else "—"
+            tabla.setItem(row, 0, QTableWidgetItem(ts_corto))
+            tabla.setItem(row, 1, QTableWidgetItem(nota.get("texto") or ""))
+            tabla.setItem(row, 2, QTableWidgetItem(nota.get("estado") or ""))
+            tabla.setItem(row, 3, QTableWidgetItem(nota.get("origen") or ""))
+            tabla.setItem(row, 4, QTableWidgetItem(score_txt))
+        tabla.scrollToBottom()
+
+    def _on_agregar_nota(self) -> None:
+        """Handler del botón 'Agregar nota': guarda la nota en el historial.
+
+        No modifica ninguna nota anterior — agrega una entrada nueva en
+        annotation_notes con el estado y origen actuales del polígono.
+        """
+        if self._annotation_manager is None:
+            return
+        features = list(self._annotation_manager.layer.selectedFeatures())
+        if not features:
+            return
+        texto = self.panel.input_notas.text().strip()
+        if not texto:
+            return
+        feat = features[0]
+        self._annotation_manager.agregar_nota(feat.id(), texto)
+        self.panel.input_notas.clear()
+        self._actualizar_historial_notas(feat.id())
+
     # ── TIGS-64: handlers de aprobar / rechazar ────────────────────────────
 
     def _on_seleccion_cambiada(self, *_args):
@@ -1125,28 +1175,31 @@ class GeoGlyph:
         self.panel.btn_rechazar.setEnabled(habilitar)
         self.panel.lbl_seleccion.setText(f"Selección actual: {seleccionados} anotaciones")
 
-        # Cargar notas del feature seleccionado en el campo de texto
+        # Cargar historial de notas del feature seleccionado
         if seleccionados == 1:
             features = list(self._annotation_manager.layer.selectedFeatures())
             if features:
                 feat = features[0]
-                notas = self._annotation_manager.leer_notas(feat.id())
-                self.panel.input_notas.setText(notas)
-                estado = feat.attribute("status") or "pending"
-                idx = self.panel.combo_estado.findText(estado)
-                if idx >= 0:
-                    self.panel.combo_estado.setCurrentIndex(idx)
-                self.panel.combo_estado.setEnabled(True)
+                # TIGS-87: mostrar historial completo y limpiar el campo de entrada
+                self._actualizar_historial_notas(feat.id())
+                self.panel.input_notas.clear()
+                self.panel.btn_agregar_nota.setEnabled(True)
+                self.panel.btn_pendiente.setEnabled(True)
         else:
-            # Si hay 0 o más de 1 seleccionados, limpiar el campo
+            # Si hay 0 o más de 1 seleccionados, limpiar historial y campo
             self.panel.input_notas.clear()
-            self.panel.combo_estado.setEnabled(False)
+            self.panel.table_historial_notas.setRowCount(0)
+            self.panel.btn_agregar_nota.setEnabled(False)
+            self.panel.btn_pendiente.setEnabled(False)
 
     def _aprobar_seleccion(self):
         self._cambiar_estado_seleccion("approve")
 
     def _rechazar_seleccion(self):
         self._cambiar_estado_seleccion("reject")
+
+    def _pendiente_seleccion(self):
+        self._cambiar_estado_seleccion("pending")
 
     def _cambiar_estado_seleccion(self, accion: str):
         """Aplica aprobar/rechazar a todos los features seleccionados.
@@ -1164,19 +1217,30 @@ class GeoGlyph:
         ok_count = 0
         errores = []
         for feat in features:
-            notas = self.panel.input_notas.text().strip()
-            if notas:
-                self._annotation_manager.guardar_notas(feat.id(), notas)
             try:
-                # Guardar las notas del panel antes de cambiar el estado
-                notas_actuales = self.panel.input_notas.text()
-                self._annotation_manager.guardar_notas(feat.id(), notas_actuales)
                 if accion == "approve":
                     cambiado = self._annotation_manager.aprobar_anotacion(feat.id())
-                else:
+                    nuevo_estado = "approved"
+                elif accion == "reject":
                     cambiado = self._annotation_manager.rechazar_anotacion(feat.id())
+                    nuevo_estado = "rejected"
+                else:  # "pending"
+                    cambiado = self._annotation_manager.pendiente_anotacion(feat.id())
+                    nuevo_estado = "pending"
+
                 if cambiado:
                     ok_count += 1
+                    # TIGS-87: guardar nota con el estado *nuevo* (post-transición)
+                    notas = self.panel.input_notas.text().strip()
+                    if notas:
+                        self._annotation_manager.agregar_nota(
+                            feat.id(),
+                            notas,
+                            estado=nuevo_estado,
+                        )
+                        self.panel.input_notas.clear()
+                    # Refrescar historial en el panel
+                    self._actualizar_historial_notas(feat.id())
             except StateTransitionError as e:
                 # Una transición inválida (p.ej. aprobar algo ya aprobado)
                 # no es fatal: la registramos y seguimos con los demás.
@@ -1284,40 +1348,6 @@ class GeoGlyph:
         # Centrar el mapa en el polígono
         self.iface.mapCanvas().zoomToFeatureIds(manager.layer, [fid])
 
-        notas = manager.leer_notas(fid)  # Cargar las notas en el panel de la pestaña 1
-        self.panel.input_notas.setText(notas)
-
-    def _on_estado_cambiado(self, nuevo_estado: str):
-        # Cambia el estado de la anotación seleccionada desde el combo del panel.
-        if self._annotation_manager is None:
-            return
-
-        features = list(self._annotation_manager.layer.selectedFeatures())
-        if not features:
-            return
-
-        feat = features[0]
-        notas = self.panel.input_notas.text().strip()
-
-        try:
-            if nuevo_estado == "approved":
-                self._annotation_manager.aprobar_anotacion(feat.id())
-            elif nuevo_estado == "rejected":
-                self._annotation_manager.rechazar_anotacion(feat.id())
-
-            if notas:
-                self._annotation_manager.guardar_notas(feat.id(), notas)
-
-            self.iface.messageBar().pushMessage(
-                "GeoGlyph",
-                f"Anotación actualizada — estado: {nuevo_estado}",
-                level=0,
-                duration=3,
-            )
-        except Exception as e:
-            self.iface.messageBar().pushMessage(
-                "GeoGlyph",
-                f"No se pudo cambiar el estado: {e}",
-                level=2,
-                duration=4,
-            )
+        # TIGS-87: mostrar historial completo de notas del polígono seleccionado
+        self._actualizar_historial_notas(fid)
+        self.panel.input_notas.clear()
