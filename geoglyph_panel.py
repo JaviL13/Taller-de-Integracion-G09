@@ -2,6 +2,7 @@
 
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QDockWidget,
     QFrame,
@@ -10,6 +11,7 @@ from qgis.PyQt.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QTableWidget,
     QTabWidget,
     QVBoxLayout,
@@ -164,15 +166,31 @@ class GeoGlyphPanel(QDockWidget):
         self.lbl_confianza.setStyleSheet("color: gray; font-size: 10px; margin-left: 4px;")
         layout.addWidget(self.lbl_confianza)
 
-        # Campo de texto libre para observaciones
-        layout.addWidget(QLabel("Estado:"))
-        self.combo_estado = QComboBox()
-        self.combo_estado.addItems(["pending", "approved", "rejected"])
-        self.combo_estado.setEnabled(False)
-        layout.addWidget(self.combo_estado)
+        # TIGS-87: Historial de notas con trazabilidad ──────────────────────
+        # Tabla que muestra el historial completo de notas del polígono
+        # seleccionado, ordenadas cronológicamente (más antigua arriba).
+        layout.addWidget(QLabel("Historial de notas:"))
+        self.table_historial_notas = QTableWidget()
+        self.table_historial_notas.setColumnCount(5)
+        self.table_historial_notas.setHorizontalHeaderLabels(["Fecha", "Nota", "Estado", "Origen", "Score"])
+        self.table_historial_notas.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table_historial_notas.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_historial_notas.setAlternatingRowColors(True)
+        self.table_historial_notas.horizontalHeader().setStretchLastSection(True)
+        self.table_historial_notas.setMaximumHeight(130)
+        self.table_historial_notas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout.addWidget(self.table_historial_notas)
+
+        # Campo para agregar una nota nueva (no sobreescribe las anteriores)
         self.input_notas = QLineEdit()
-        self.input_notas.setPlaceholderText("Notas ...")
+        self.input_notas.setPlaceholderText("Agregar nota ...")
         layout.addWidget(self.input_notas)
+        self.btn_agregar_nota = QPushButton("Agregar nota")
+        self.btn_agregar_nota.setToolTip(
+            "Guarda la nota en el historial del polígono seleccionado (no elimina notas anteriores)"
+        )
+        self.btn_agregar_nota.setEnabled(False)
+        layout.addWidget(self.btn_agregar_nota)
 
         self.btn_aprobar = QPushButton("Aprobar")
         self.btn_aprobar.setToolTip("Marca la anotación seleccionada como aprobada (verde)")
@@ -183,6 +201,11 @@ class GeoGlyphPanel(QDockWidget):
         self.btn_rechazar.setToolTip("Marca la anotación seleccionada como rechazada (rojo)")
         self.btn_rechazar.setEnabled(False)
         layout.addWidget(self.btn_rechazar)
+
+        self.btn_pendiente = QPushButton("Pendiente")
+        self.btn_pendiente.setToolTip("Devuelve la anotación seleccionada al estado pendiente (naranja)")
+        self.btn_pendiente.setEnabled(False)
+        layout.addWidget(self.btn_pendiente)
 
         layout.addWidget(self._separador())
 

@@ -13,6 +13,7 @@
 
 import json
 import os
+import sqlite3
 from datetime import datetime, timezone
 
 from qgis.core import (
@@ -69,6 +70,27 @@ except ImportError:
 
 
 GPKG_TABLE = "annotations"
+
+# Tabla de historial de notas (no espacial, gestionada vía sqlite3 directo).
+GPKG_NOTES_TABLE = "annotation_notes"
+
+# DDL de la tabla de notas. Se usa tanto para crearla en GPKGs nuevos como
+# para migrar GPKGs existentes que no la tengan (CREATE TABLE IF NOT EXISTS).
+_DDL_ANNOTATION_NOTES = """
+CREATE TABLE IF NOT EXISTS annotation_notes (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    annotation_id INTEGER NOT NULL,
+    texto         TEXT    NOT NULL DEFAULT '',
+    origen        TEXT    NOT NULL,
+    estado        TEXT    NOT NULL,
+    score         REAL,
+    timestamp     TEXT    NOT NULL
+);
+"""
+
+_DDL_ANNOTATION_NOTES_INDEX = (
+    "CREATE INDEX IF NOT EXISTS idx_annotation_notes_annotation_id ON annotation_notes(annotation_id);"
+)
 
 
 class AnnotationManager:
@@ -131,6 +153,10 @@ class AnnotationManager:
         layer = QgsVectorLayer(uri, GPKG_TABLE, "ogr")
         if not layer.isValid():
             raise RuntimeError(f"No se pudo abrir la capa '{GPKG_TABLE}' en {self.gpkg_path}")
+
+        # Migración: asegurar que annotation_notes exista en GPKGs creados
+        # antes de esta versión del plugin (que no la tenían).
+        self._asegurar_tabla_notas()
 
         # 4. Migrar al GPKG los features rescatados de capas memory obsoletas.
         if features_a_migrar:
@@ -232,6 +258,10 @@ class AnnotationManager:
             opciones,
         )
 
+        # La tabla annotation_notes no es espacial, así que la creamos
+        # directamente con sqlite3 una vez que el .gpkg ya existe en disco.
+        self._asegurar_tabla_notas()
+
     # ── Operaciones sobre anotaciones ──────────────────────────────────────
 
     def agregar_anotacion(
@@ -319,6 +349,15 @@ class AnnotationManager:
         """
         return self._cambiar_estado(feature_id, AnnotationState.REJECTED)
 
+    def pendiente_anotacion(self, feature_id: int) -> bool:
+        """Cambia el status del feature a 'pending' y persiste el cambio.
+
+        Útil para devolver una anotación approved/rejected a revisión.
+        Lanza StateTransitionError si la transición no es válida (p.ej.
+        intentar poner en pending algo que ya está pending).
+        """
+        return self._cambiar_estado(feature_id, AnnotationState.PENDING)
+
     def _cambiar_estado(self, feature_id: int, nuevo_estado: AnnotationState) -> bool:
         """Helper interno: valida la transición, actualiza atributos y persiste.
 
@@ -357,38 +396,144 @@ class AnnotationManager:
         self.layer.triggerRepaint()
         return True
 
-    # TIGS 69: asociar las notas a los polígonos ------------------------------------------------
+    # TIGS-87: Historial de notas por polígono con trazabilidad ─────────────
 
-    # Guarda las notas del arqueólogo en el atributo "notas" del feature. Retorna True si se guardó correctamente.
-    def guardar_notas(self, feature_id: int, notas: str) -> bool:
-        feature = self.layer.getFeature(feature_id)
-        if not feature.isValid():
-            return False
+    def _asegurar_tabla_notas(self) -> None:
+        """Crea la tabla annotation_notes si no existe.
 
-        idx_notas = self.layer.fields().indexFromName("notas")
-        ok = self.layer.dataProvider().changeAttributeValues(
+        Es idempotente gracias a CREATE TABLE IF NOT EXISTS: se puede llamar
+        en GPKGs nuevos (creación) y en GPKGs existentes (migración automática).
+        No usa QGIS ni OGR — opera directamente sobre el archivo SQLite.
+        """
+        conn = sqlite3.connect(self.gpkg_path)
+        try:
+            conn.execute(_DDL_ANNOTATION_NOTES)
+            conn.execute(_DDL_ANNOTATION_NOTES_INDEX)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def agregar_nota(
+        self,
+        annotation_id: int,
+        texto: str,
+        origen: str = None,
+        estado: str = None,
+        score: float = None,
+    ) -> bool:
+        """Agrega una nueva entrada al historial de notas de un polígono.
+
+        Nunca sobreescribe notas anteriores: cada llamada inserta una fila
+        nueva en annotation_notes. Eso garantiza la trazabilidad completa
+        requerida por CENIA.
+
+        Args:
+            annotation_id: fid del feature en la capa annotations.
+            texto: contenido textual de la nota.
+            origen: 'ml-annotation' o 'human-annotation'. Si no se pasa, se
+                lee del feature en la capa (campo 'origin').
+            estado: 'pending', 'approved' o 'rejected'. Si no se pasa, se
+                lee del feature (campo 'status') para capturar el estado
+                *al momento de escribir* la nota.
+            score: score de confianza al momento de escribir la nota. Si no
+                se pasa, se lee del feature (campo 'score').
+
+        Returns:
+            True si la nota se guardó correctamente.
+        """
+        if not texto:
+            return True  # nada que guardar
+
+        # Leer atributos del feature si no se pasaron explícitamente.
+        if origen is None or estado is None or score is None:
+            feat = self.layer.getFeature(annotation_id)
+            if feat.isValid():
+                if origen is None:
+                    raw = feat.attribute("origin")
+                    origen = str(raw) if raw is not None and raw != NULL else "human-annotation"
+                if estado is None:
+                    raw = feat.attribute("status")
+                    estado = str(raw) if raw is not None and raw != NULL else "pending"
+                if score is None:
+                    raw = feat.attribute("score")
+                    if raw is not None and raw != NULL:
+                        try:
+                            score = float(raw)
+                        except (TypeError, ValueError):
+                            score = None
+
+        origen = origen or "human-annotation"
+        estado = estado or "pending"
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        conn = sqlite3.connect(self.gpkg_path)
+        try:
+            conn.execute(
+                "INSERT INTO annotation_notes "
+                "(annotation_id, texto, origen, estado, score, timestamp) "
+                "VALUES (?, ?, ?, ?, ?, ?);",
+                (annotation_id, texto, origen, estado, score, timestamp),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return True
+
+    def leer_historial_notas(self, annotation_id: int) -> list:
+        """Retorna el historial completo de notas de un polígono.
+
+        Orden cronológico ascendente (más antigua primero). Cada elemento
+        es un dict con claves: id, texto, origen, estado, score, timestamp.
+        Retorna lista vacía si no hay notas o si el .gpkg no tiene aún la
+        tabla (GPKGs muy antiguos antes de esta versión).
+        """
+        try:
+            conn = sqlite3.connect(self.gpkg_path)
+            try:
+                rows = conn.execute(
+                    "SELECT id, texto, origen, estado, score, timestamp "
+                    "FROM annotation_notes "
+                    "WHERE annotation_id = ? "
+                    "ORDER BY timestamp ASC;",
+                    (annotation_id,),
+                ).fetchall()
+            finally:
+                conn.close()
+        except sqlite3.OperationalError:
+            # La tabla no existe en este GPKG (migración pendiente).
+            return []
+        return [
             {
-                feature_id: {
-                    idx_notas: notas,
-                }
+                "id": r[0],
+                "texto": r[1],
+                "origen": r[2],
+                "estado": r[3],
+                "score": r[4],
+                "timestamp": r[5],
             }
-        )
-        if ok:
-            self.layer.triggerRepaint()
-        return ok
+            for r in rows
+        ]
 
-    # Lee las notas guardadas de un feature. Retorna string vacío si no tiene.
+    # TIGS 69 (compat): las funciones guardar_notas / leer_notas se mantienen
+    # para no romper código existente. Internamente delegan al historial.
+
+    def guardar_notas(self, feature_id: int, notas: str) -> bool:
+        """Compatibilidad: agrega 'notas' como nueva entrada en el historial.
+
+        No sobreescribe entradas anteriores; simplemente delega a agregar_nota().
+        Si 'notas' está vacío no hace nada.
+        """
+        return self.agregar_nota(feature_id, notas)
+
     def leer_notas(self, feature_id: int) -> str:
-        feature = self.layer.getFeature(feature_id)
-        if not feature.isValid():
-            return ""
-        notas = feature.attribute("notas")
-        # OJO: el provider OGR/GPKG devuelve NULL (un QVariant especial),
-        # no Python None, cuando el campo está vacío. Hay que cubrir ambos
-        # casos antes de pasar el valor a setText() del QLineEdit/QTextEdit.
-        if notas is None or notas == NULL:
-            return ""
-        return str(notas)
+        """Compatibilidad: retorna el texto de la nota más reciente del historial.
+
+        Retorna string vacío si no hay notas.
+        """
+        historial = self.leer_historial_notas(feature_id)
+        if historial:
+            return historial[-1]["texto"]
+        return ""
 
     # ── Estilo visual ──────────────────────────────────────────────────────
 
