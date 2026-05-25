@@ -107,11 +107,13 @@ def run_sam(
     if image.dtype != np.uint8:
         image = np.clip(image, 0, 255).astype(np.uint8)
 
-    # Si no se pasan puntos, usar el punto central
+    # Si no se pasan puntos, usar cuadrícula 3×3 para mejor cobertura del ROI
     if points is None:
         h, w = image.shape[:2]
-        points = np.array([[w // 2, h // 2]], dtype=np.float32)
-        labels = np.array([1], dtype=np.int32)  # Foreground
+        xs = [w // 4, w // 2, 3 * w // 4]
+        ys = [h // 4, h // 2, 3 * h // 4]
+        points = np.array([[x, y] for y in ys for x in xs], dtype=np.float32)
+        labels = np.ones(len(points), dtype=np.int32)
 
     # Si se pasan puntos pero no labels, asumir todos foreground
     if labels is None:
@@ -122,21 +124,17 @@ def run_sam(
         # Procesar la imagen con el predictor de MobileSAM.
         _sam_predictor.set_image(image)
 
-        # Ejecutar predicción con puntos de prompt
+        # Ejecutar predicción con puntos de prompt — 3 candidatos para elegir el mejor
         masks, scores, logits = _sam_predictor.predict(
             point_coords=points,
             point_labels=labels,
-            multimask_output=False,  # Solo queremos UNA máscara (no 3)
+            multimask_output=True,
         )
-        # masks tiene forma (1, H, W) o (H, W) según la versión
-        mask_binary = masks[0] if len(masks.shape) == 3 else masks
-
-        # Convertir a uint8 (0 o 255)
+        # Seleccionar la máscara con mayor score
+        best_idx = int(np.argmax(scores))
+        mask_binary = masks[best_idx]
+        confidence = float(scores[best_idx])
         mask_output = (mask_binary * 255).astype(np.uint8)
-
-        # Calcular confianza como la media del score de certeza
-        # scores es un array de floats [0, 1] por máscara
-        confidence = float(scores[0]) if isinstance(scores, np.ndarray) else float(scores)
 
     except Exception as e:
         raise RuntimeError(f"Error durante la inferencia con MobileSAM: {e}") from e
