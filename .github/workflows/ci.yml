@@ -79,7 +79,7 @@ jobs:
 
       - name: Install pytest-qgis and project dependencies
         run: |
-          pip3 install pytest pytest-qgis pytest-cov
+          pip3 install pytest pytest-qgis==2.1.0 pytest-cov
           pip3 install rasterio numpy shapely
           pip3 install -r requirements.txt || true
 
