@@ -86,6 +86,8 @@ jobs:
       - name: Run QGIS integration tests
         env:
           QT_QPA_PLATFORM: offscreen
+          QGIS_PREFIX_PATH: /usr
+          QT_QPA_FONTDIR: /usr/share/fonts
         run: |
           pytest tests/test_qgis_integration.py tests/test_annotation_persistence.py \
             -m "qgis" -v \
