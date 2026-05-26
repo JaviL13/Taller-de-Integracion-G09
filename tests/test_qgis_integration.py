@@ -1,4 +1,4 @@
-# TIGS 93: Integrar QGIS en el pipeline de CI 
+# TIGS 93: Integrar QGIS en el pipeline de CI
 
 # Este archivo contiene un test básico para verificar que el entorno QGIS
 # funciona correctamente dentro del pipeline de CI (GitHub Actions).
@@ -8,9 +8,10 @@
 
 # -*- coding: utf-8 -*-
 
-def test_qgis_application_starts(qgis_app):     
-    
-    # qgis_app es un fixture que provee pytest-qgis automáticamente. Se encarga de 
+
+def test_qgis_application_starts(qgis_app):
+
+    # qgis_app es un fixture que provee pytest-qgis automáticamente. Se encarga de
     # inicializar QGIS antes del test y apagarlo al terminar,
     from qgis.core import QgsApplication
 
