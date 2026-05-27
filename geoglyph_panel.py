@@ -126,10 +126,10 @@ class GeoGlyphPanel(QDockWidget):
         )
         layout.addWidget(self.btn_roi)
 
-        btn_importar = QPushButton("Importar detecciones")
-        btn_importar.setToolTip("Importa detecciones en formato GeoJSON o probability map TIFF (próximamente)")
-        btn_importar.setEnabled(False)
-        layout.addWidget(btn_importar)
+        # Importar anotaciones en GeoJson
+        self.btn_importar_geojson = QPushButton("Importar anotaciones")
+        self.btn_importar_geojson.setToolTip("Importa anotaciones en formato GeoJSON")
+        layout.addWidget(self.btn_importar_geojson)
 
         # Exportar anotaciones aprobadas en GeoJson
         self.btn_exportar_geojson = QPushButton("Exportar anotaciones")

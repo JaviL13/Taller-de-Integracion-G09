@@ -26,12 +26,12 @@
 
 # -*- coding: utf-8 -*-
 import os.path
-
+import json
 import numpy as np
-from qgis.core import QgsGeometry, QgsPointXY, QgsRasterLayer
+from qgis.core import QgsGeometry, QgsPointXY, QgsRasterLayer, QgsJsonUtils
 from qgis.PyQt.QtCore import QCoreApplication, QSettings, Qt, QTranslator
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction, QTableWidgetItem
+from qgis.PyQt.QtWidgets import QAction, QTableWidgetItem, QFileDialog
 from rasterio.transform import from_bounds
 
 from .annotation_manager import AnnotationManager
@@ -145,6 +145,8 @@ class GeoGlyph:
         # ── TIGS-87: historial de notas ───────────────────────────────────
         self.panel.btn_agregar_nota.clicked.connect(self._on_agregar_nota)
 
+        # Botón para importar anotaciones
+        self.panel.btn_importar_geojson.clicked.connect(self.importar_anotaciones_geojson)
         # Botón para exportar anotaciones
         self.panel.btn_exportar_geojson.clicked.connect(self.exportar_anotaciones_geojson)
 
@@ -761,6 +763,89 @@ class GeoGlyph:
 
         # Volver a la herramienta de navegación normal
         self.iface.mapCanvas().unsetMapTool(self._draw_tool)
+
+    # Importar anotaciones
+    def importar_anotaciones_geojson(self):
+
+        manager = self._get_or_create_annotation_manager()
+
+        ruta, _ = QFileDialog.getOpenFileName(
+            self.iface.mainWindow(),
+            "Importar anotaciones",
+            "",
+            "GeoJSON (*.geojson *.json)",
+        )
+
+        if not ruta:
+            return
+
+        try:
+            with open(ruta, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if data.get("type") != "FeatureCollection":
+                raise ValueError("GeoJSON inválido")
+
+            existentes = [f.geometry() for f in manager.layer.getFeatures()]
+            importadas = 0
+
+            for feat in data.get("features", []):
+
+                geom_data = feat.get("geometry")
+                props = feat.get("properties", {})
+
+                if not geom_data:
+                    continue
+
+                geometry = QgsJsonUtils.geometryFromGeoJson(json.dumps(geom_data))
+
+                if geometry.isEmpty():
+                    continue
+
+                # evitar duplicados
+                if any(geometry.equals(g) for g in existentes):
+                    continue
+
+                nueva = manager.agregar_anotacion(
+                    geometry,
+                    origin=props.get("origin", "human"),
+                    score=props.get("score"),
+                )
+
+                if not nueva.isValid():
+                    continue
+
+                # aprobar automáticamente si venía aprobado
+                manager.aprobar_anotacion(nueva.id())
+
+                # restaurar notas si existen
+                notas = props.get("notas", [])
+                for n in notas:
+                    manager.agregar_nota(
+                        nueva.id(),
+                        n.get("texto", ""),
+                        origen=n.get("origen"),
+                        estado=n.get("estado"),
+                        score=n.get("score"),
+                    )
+
+                importadas += 1
+                existentes.append(geometry)
+
+            self._cargar_tabla_poligonos()
+
+            self.iface.messageBar().pushSuccess(
+                "GeoGlyph",
+                f"{importadas} anotaciones importadas correctamente.",
+            )
+
+        except Exception as e:
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                f"Error al importar: {e}",
+                level=2,
+                duration=4,
+            )
 
     # Exportar anotaciones aprobadas
     def exportar_anotaciones_geojson(self):
