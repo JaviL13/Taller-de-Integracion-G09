@@ -1360,7 +1360,7 @@ class GeoGlyph:
         # TIGS-87: mostrar historial completo de notas del polígono seleccionado
         self._actualizar_historial_notas(fid)
         self.panel.input_notas.clear()
-    
+
     def _iniciar_health_check(self):
         # Inicia el polling periódico al endpoint GET/health.
         self._health_worker = HealthWorker(

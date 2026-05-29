@@ -6,10 +6,10 @@ from qgis.PyQt.QtCore import QThread, pyqtSignal
 
 
 class HealthWorker(QThread):
-    # Polling periódico a GET/health. 
+    # Polling periódico a GET/health.
 
-    backend_up = pyqtSignal() # El backend respondió correctamente
-    backend_down = pyqtSignal(str) # El backend no respondió (mensaje de error)
+    backend_up = pyqtSignal()  # El backend respondió correctamente
+    backend_down = pyqtSignal(str)  # El backend no respondió (mensaje de error)
 
     TIMEOUT_SECONDS = 5
 
@@ -37,7 +37,7 @@ class HealthWorker(QThread):
                 self.backend_down.emit(str(e.reason))
             except TimeoutError:
                 self.backend_down.emit(f"Timeout ({self.TIMEOUT_SECONDS}s)")
-            except Exception as e:  
+            except Exception as e:
                 self.backend_down.emit(f"{type(e).__name__}: {e}")
 
             self.msleep(self.interval_seconds * 1000)

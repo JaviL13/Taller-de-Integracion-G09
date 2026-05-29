@@ -262,8 +262,7 @@ class GeoGlyphPanel(QDockWidget):
         self.lbl_backend_status = QLabel("⚠ Backend no disponible")
         self.lbl_backend_status.setAlignment(Qt.AlignCenter)
         self.lbl_backend_status.setStyleSheet(
-            "background-color: #c0392b; color: white; "
-            "font-weight: bold; padding: 4px; font-size: 11px;"
+            "background-color: #c0392b; color: white; font-weight: bold; padding: 4px; font-size: 11px;"
         )
         self.lbl_backend_status.setVisible(False)
 
