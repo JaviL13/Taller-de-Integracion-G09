@@ -41,8 +41,8 @@ from .color_ramp_worker import ColorRampWorker  # TIGS-S5-04
 from .decorrelation_dialog import DecorrelationStretchDialog
 from .geoglyph_dialog import GeoGlyphDialog
 from .geoglyph_panel import GeoGlyphPanel  # Se importa el panel con los botones
-from .http_worker import EnhanceWorker  # ← nuevo en TIGS-42
 from .health_worker import HealthWorker # TIGS-91
+from .http_worker import EnhanceWorker  # ← nuevo en TIGS-42
 from .infer_worker import InferWorker  # TIGS-53
 from .raster_crop import extract_raster_crop, extract_raster_pixels  # TIGS-53, TIGS-70
 from .resources import *  # noqa: F403, F401
@@ -1377,5 +1377,5 @@ class GeoGlyph:
 
     def _on_backend_down(self, msg: str):
         # Muestra el banner cuando el backend no responde
-        self.panel.lbl_backend_status.setText(f"⚠ Backend no disponible")
+        self.panel.lbl_backend_status.setText("⚠ Backend no disponible")
         self.panel.lbl_backend_status.setVisible(True)
