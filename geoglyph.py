@@ -41,7 +41,7 @@ from .color_ramp_worker import ColorRampWorker  # TIGS-S5-04
 from .decorrelation_dialog import DecorrelationStretchDialog
 from .geoglyph_dialog import GeoGlyphDialog
 from .geoglyph_panel import GeoGlyphPanel  # Se importa el panel con los botones
-from .health_worker import HealthWorker # TIGS-91
+from .health_worker import HealthWorker  # TIGS-91
 from .http_worker import EnhanceWorker  # ← nuevo en TIGS-42
 from .infer_worker import InferWorker  # TIGS-53
 from .raster_crop import extract_raster_crop, extract_raster_pixels  # TIGS-53, TIGS-70
