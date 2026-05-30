@@ -93,10 +93,16 @@ class GeoGlyphPanel(QDockWidget):
         layout.addWidget(self.color_ramp_container)
         self.toggle_ui()
 
-        btn_side_by_side = QPushButton("Vista Side-by-Side")
-        btn_side_by_side.setToolTip("Compara dos configuraciones de visualización en paralelo (próximamente)")
-        btn_side_by_side.setEnabled(False)
-        layout.addWidget(btn_side_by_side)
+        self.btn_side_by_side = QPushButton("Activar vista Side-by-Side")
+        self.btn_side_by_side.setToolTip("Compara dos configuraciones de visualización en paralelo")
+        self.btn_side_by_side.setEnabled(True)
+        layout.addWidget(self.btn_side_by_side)
+
+        # TIGS 100: botón para activar/desactivar la sincronización
+        self.btn_sync = QPushButton("Sincronización: ON")
+        self.btn_sync.setToolTip("Activa o desactiva la sincronización de zoom y pan entre los 2 canvas")
+        self.btn_sync.setEnabled(False)  # Se habilitar con el split view
+        layout.addWidget(self.btn_sync)
 
         # Label de estado del realce (Color Ramp / DStretch) — TIGS-S5-04
         self.lbl_enhance_status = QLabel("")
