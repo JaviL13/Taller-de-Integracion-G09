@@ -35,6 +35,7 @@ from qgis.core import (
     QgsRectangle,
 )
 
+MAX_ROI_PIXELS = 2048
 
 def extract_raster_crop(layer: QgsRasterLayer, rect: QgsRectangle) -> dict:
     """Extrae los metadatos del recorte de un raster dada una ROI.
@@ -101,6 +102,13 @@ def extract_raster_crop(layer: QgsRasterLayer, rect: QgsRectangle) -> dict:
     pixels_w = max(1, int(round(roi_clipped.width() * px_per_unit_x)))
     pixels_h = max(1, int(round(roi_clipped.height() * px_per_unit_y)))
 
+    # Validar que el ROI no supere el límite máximo procesable por SAM.
+    if pixels_w > MAX_ROI_PIXELS or pixels_h > MAX_ROI_PIXELS:
+        raise ValueError(
+            f"El ROI seleccionado es demasiado grande ({pixels_w}x{pixels_h} px). "
+            f"El límite máximo es {MAX_ROI_PIXELS}x{MAX_ROI_PIXELS} px. "
+            "Selecciona una región más pequeña."
+        )
     # ------------------------------------------------------------------ #
     # 4. Inferir EPSG y path del archivo fuente                          #
     # ------------------------------------------------------------------ #
