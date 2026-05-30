@@ -76,6 +76,14 @@ class GeoGlyphPanel(QDockWidget):
         color_layout.addWidget(QLabel("Banda:"))
         self.combo_band = QComboBox()
         color_layout.addWidget(self.combo_band)
+        # Aplicar sobre: vista actual o imagen completa
+        color_layout.addWidget(QLabel("Aplicar sobre:"))
+        self.combo_color_ramp_extent = QComboBox()
+        self.combo_color_ramp_extent.addItems([
+            "Vista actual",
+            "Imagen completa",
+        ])
+        color_layout.addWidget(self.combo_color_ramp_extent)
         # Opciones esquemas de colores
         color_layout.addWidget(QLabel("Esquema de color:"))
         self.combo_color_ramp = QComboBox()

@@ -49,6 +49,7 @@ class ColorRampWorker(QThread):
         band: int,
         min_val=None,
         max_val=None,
+        window=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -56,6 +57,8 @@ class ColorRampWorker(QThread):
         self.band = int(band)
         self._min_val = float(min_val) if min_val is not None else None
         self._max_val = float(max_val) if max_val is not None else None
+        # window = (xoff, yoff, xsize, ysize) o None
+        self.window = window
 
     # ------------------------------------------------------------------
     # Hilo de trabajo
@@ -76,6 +79,7 @@ class ColorRampWorker(QThread):
             # importable en entornos de test sin osgeo instalado.
             try:
                 from osgeo import gdal
+                import numpy as np
 
                 gdal.UseExceptions()
             except ImportError:
@@ -104,12 +108,54 @@ class ColorRampWorker(QThread):
             # approx_ok=True usa overviews si están disponibles (más rápido).
             self.progress.emit(2, self._TOTAL_STEPS)
             band_obj = ds.GetRasterBand(self.band)
-            stats = band_obj.GetStatistics(True, True)
+            if self.window is None:
+                # comportamiento actual
+                stats = band_obj.GetStatistics(True, True)
+
+                min_val = float(stats[0])
+                max_val = float(stats[1])
+
+            else:
+                # NUEVO: stats sobre vista actual
+                xoff, yoff, xsize, ysize = self.window
+
+                arr = band_obj.ReadAsArray(
+                    xoff,
+                    yoff,
+                    xsize,
+                    ysize,
+                )
+
+                if arr is None or arr.size == 0:
+                    ds = None
+                    self.error.emit(
+                        "La vista actual no contiene píxeles válidos."
+                    )
+                    return
+
+                nodata = band_obj.GetNoDataValue()
+
+                if nodata is not None:
+                    arr = arr[arr != nodata]
+
+                if arr.size == 0:
+                    ds = None
+                    self.error.emit(
+                        "La vista actual sólo contiene nodata."
+                    )
+                    return
+
+                min_val = float(np.nanmin(arr))
+                max_val = float(np.nanmax(arr))
+
             ds = None
 
             # Paso 3 — listo
             self.progress.emit(self._TOTAL_STEPS, self._TOTAL_STEPS)
-            self.finished.emit(float(stats[0]), float(stats[1]))
+            self.finished.emit(min_val, max_val)
 
         except Exception as e:  # noqa: BLE001
-            self.error.emit(f"Error calculando estadísticas de banda: {type(e).__name__}: {e}")
+            self.error.emit(
+                f"Error calculando estadísticas de banda: "
+                f"{type(e).__name__}: {e}"
+            )
