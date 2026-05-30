@@ -26,12 +26,12 @@
 
 # -*- coding: utf-8 -*-
 import os.path
-
+import json
 import numpy as np
-from qgis.core import QgsGeometry, QgsPointXY, QgsRasterLayer
+from qgis.core import QgsGeometry, QgsPointXY, QgsRasterLayer, QgsJsonUtils, QgsRectangle
 from qgis.PyQt.QtCore import QCoreApplication, QSettings, Qt, QTranslator
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction, QTableWidgetItem
+from qgis.PyQt.QtWidgets import QAction, QTableWidgetItem, QFileDialog
 from rasterio.transform import from_bounds
 
 from .annotation_manager import AnnotationManager
@@ -154,6 +154,8 @@ class GeoGlyph:
         # ── TIGS-87: historial de notas ───────────────────────────────────
         self.panel.btn_agregar_nota.clicked.connect(self._on_agregar_nota)
 
+        # Botón para importar anotaciones
+        self.panel.btn_importar_geojson.clicked.connect(self.importar_anotaciones_geojson)
         # Botón para exportar anotaciones
         self.panel.btn_exportar_geojson.clicked.connect(self.exportar_anotaciones_geojson)
 
@@ -331,6 +333,7 @@ class GeoGlyph:
 
         ramp_type = self.panel.combo_color_ramp.currentText()
         band_text = self.panel.combo_band.currentText().strip()
+        extent_mode = self.panel.combo_color_ramp_extent.currentText()
         if not band_text:
             self.panel.lbl_enhance_status.setText("Selecciona una capa raster primero")
             self.panel.lbl_enhance_status.setStyleSheet("color: orange; font-size: 10px; margin-left: 4px;")
@@ -342,9 +345,6 @@ class GeoGlyph:
         min_val = float(min_text) if min_text else None
         max_val = float(max_text) if max_text else None
 
-        # Guardar contexto para el callback (evita leer la UI desde el worker).
-        self._color_ramp_context = {"ramp_type": ramp_type, "band": band, "layer": layer}
-
         # UI en modo "procesando".
         self.panel.btn_apply.setEnabled(False)
         self.panel.lbl_enhance_status.setText("Calculando estadísticas de banda…")
@@ -353,8 +353,69 @@ class GeoGlyph:
         src_path = layer.source()
         if "|" in src_path:
             src_path = src_path.split("|", 1)[0]
+        window = None
 
-        self._color_ramp_worker = ColorRampWorker(src_path, band, min_val=min_val, max_val=max_val)
+        if extent_mode == "Vista actual":
+            canvas_extent = self.iface.mapCanvas().extent()
+            layer_extent = layer.extent()
+
+            if layer_extent.intersects(canvas_extent):
+
+                intersection = QgsRectangle(canvas_extent)
+                intersection.intersect(layer_extent)
+
+                 # Si la vista contiene toda la imagen:
+                # usar imagen completa
+                if (
+                    intersection.width() >= layer_extent.width()
+                    and intersection.height() >= layer_extent.height()
+                ):
+                    window = None
+
+                else:
+
+                    x_size = layer.width()
+                    y_size = layer.height()
+
+                    x_res = layer_extent.width() / x_size
+                    y_res = layer_extent.height() / y_size
+
+                    xoff = max(
+                        0,
+                        int(
+                            (intersection.xMinimum() - layer_extent.xMinimum()) / x_res
+                        ),
+                    )
+
+                    yoff = max(
+                        0,
+                        int(
+                            (layer_extent.yMaximum() - intersection.yMaximum()) / y_res
+                        ),
+                    )
+
+                    xsize = min(
+                        x_size - xoff,
+                        max(1, int(intersection.width() / x_res)),
+                    )
+
+                    ysize = min(
+                        y_size - yoff,
+                        max(1, int(intersection.height() / y_res)),
+                    )
+
+                    window = (
+                        xoff,
+                        yoff,
+                        xsize,
+                        ysize,
+                    )
+
+        # Guardar contexto para el callback (evita leer la UI desde el worker).
+        self._color_ramp_context = {"ramp_type": ramp_type, 
+                                    "band": band, "layer": layer, "extent_mode": extent_mode, "window": window,}
+
+        self._color_ramp_worker = ColorRampWorker(src_path, band, min_val=min_val, max_val=max_val, window=window)
         self._color_ramp_worker.progress.connect(self._on_color_ramp_progress)
         self._color_ramp_worker.finished.connect(self._on_color_ramp_done)
         self._color_ramp_worker.error.connect(self._on_color_ramp_error)
@@ -389,6 +450,8 @@ class GeoGlyph:
         ramp_type = ctx.get("ramp_type", "viridis")
         band = ctx.get("band", 1)
         layer = ctx.get("layer")
+        extent_mode = ctx.get("extent_mode")
+        window = ctx.get("window")
         if layer is None:
             return
 
@@ -423,11 +486,92 @@ class GeoGlyph:
         shader = QgsRasterShader()
         shader.setRasterShaderFunction(color_ramp)
 
-        provider = layer.dataProvider()
-        renderer = QgsSingleBandPseudoColorRenderer(provider, band, shader)
-        new_layer = layer.clone()
-        new_layer.setRenderer(renderer)
-        new_layer.setName(f"{layer.name()}_{ramp_type}")
+        from qgis.core import QgsRasterLayer
+        from osgeo import gdal
+        import tempfile
+        import os
+
+        if extent_mode == "Vista actual" and window is not None:
+
+            src_path = layer.source()
+            if "|" in src_path:
+                src_path = src_path.split("|", 1)[0]
+
+            xoff, yoff, xsize, ysize = window
+
+            ds = gdal.Open(src_path, gdal.GA_ReadOnly)
+            band_obj = ds.GetRasterBand(band)
+
+            arr = band_obj.ReadAsArray(
+                xoff,
+                yoff,
+                xsize,
+                ysize,
+            )
+
+            gt = ds.GetGeoTransform()
+
+            new_gt = (
+                gt[0] + xoff * gt[1],
+                gt[1],
+                gt[2],
+                gt[3] + yoff * gt[5],
+                gt[4],
+                gt[5],
+            )
+
+            tmp_path = os.path.join(
+                tempfile.gettempdir(),
+                f"{layer.name()}_{ramp_type}_view.tif",
+            )
+
+            driver = gdal.GetDriverByName("GTiff")
+            out_ds = driver.Create(
+                tmp_path,
+                xsize,
+                ysize,
+                1,
+                band_obj.DataType,
+            )
+
+            out_ds.SetGeoTransform(new_gt)
+            out_ds.SetProjection(ds.GetProjection())
+
+            out_band = out_ds.GetRasterBand(1)
+            out_band.WriteArray(arr)
+
+            out_ds.FlushCache()
+
+            ds = None
+            out_ds = None
+
+            new_layer = QgsRasterLayer(
+                tmp_path,
+                f"{layer.name()}_{ramp_type}_view",
+            )
+
+            provider = new_layer.dataProvider()
+            renderer = QgsSingleBandPseudoColorRenderer(
+                provider,
+                1,
+                shader,
+            )
+
+            new_layer.setRenderer(renderer)
+
+        else:
+            provider = layer.dataProvider()
+
+            renderer = QgsSingleBandPseudoColorRenderer(
+                provider,
+                band,
+                shader,
+            )
+
+            new_layer = layer.clone()
+            new_layer.setRenderer(renderer)
+            new_layer.setName(f"{layer.name()}_{ramp_type}")
+
         QgsProject.instance().addMapLayer(new_layer)
 
         self.panel.lbl_enhance_status.setText(f"Color Ramp «{ramp_type}» aplicado ✓")
@@ -777,6 +921,89 @@ class GeoGlyph:
 
         # Volver a la herramienta de navegación normal
         self.iface.mapCanvas().unsetMapTool(self._draw_tool)
+
+    # Importar anotaciones
+    def importar_anotaciones_geojson(self):
+
+        manager = self._get_or_create_annotation_manager()
+
+        ruta, _ = QFileDialog.getOpenFileName(
+            self.iface.mainWindow(),
+            "Importar anotaciones",
+            "",
+            "GeoJSON (*.geojson *.json)",
+        )
+
+        if not ruta:
+            return
+
+        try:
+            with open(ruta, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if data.get("type") != "FeatureCollection":
+                raise ValueError("GeoJSON inválido")
+
+            existentes = [f.geometry() for f in manager.layer.getFeatures()]
+            importadas = 0
+
+            for feat in data.get("features", []):
+
+                geom_data = feat.get("geometry")
+                props = feat.get("properties", {})
+
+                if not geom_data:
+                    continue
+
+                geometry = QgsJsonUtils.geometryFromGeoJson(json.dumps(geom_data))
+
+                if geometry.isEmpty():
+                    continue
+
+                # evitar duplicados
+                if any(geometry.equals(g) for g in existentes):
+                    continue
+
+                nueva = manager.agregar_anotacion(
+                    geometry,
+                    origin=props.get("origin", "human"),
+                    score=props.get("score"),
+                )
+
+                if not nueva.isValid():
+                    continue
+
+                # aprobar automáticamente si venía aprobado
+                manager.aprobar_anotacion(nueva.id())
+
+                # restaurar notas si existen
+                notas = props.get("notas", [])
+                for n in notas:
+                    manager.agregar_nota(
+                        nueva.id(),
+                        n.get("texto", ""),
+                        origen=n.get("origen"),
+                        estado=n.get("estado"),
+                        score=n.get("score"),
+                    )
+
+                importadas += 1
+                existentes.append(geometry)
+
+            self._cargar_tabla_poligonos()
+
+            self.iface.messageBar().pushSuccess(
+                "GeoGlyph",
+                f"{importadas} anotaciones importadas correctamente.",
+            )
+
+        except Exception as e:
+            self.iface.messageBar().pushMessage(
+                "GeoGlyph",
+                f"Error al importar: {e}",
+                level=2,
+                duration=4,
+            )
 
     # Exportar anotaciones aprobadas
     def exportar_anotaciones_geojson(self):

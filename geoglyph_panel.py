@@ -76,6 +76,14 @@ class GeoGlyphPanel(QDockWidget):
         color_layout.addWidget(QLabel("Banda:"))
         self.combo_band = QComboBox()
         color_layout.addWidget(self.combo_band)
+        # Aplicar sobre: vista actual o imagen completa
+        color_layout.addWidget(QLabel("Aplicar sobre:"))
+        self.combo_color_ramp_extent = QComboBox()
+        self.combo_color_ramp_extent.addItems([
+            "Vista actual",
+            "Imagen completa",
+        ])
+        color_layout.addWidget(self.combo_color_ramp_extent)
         # Opciones esquemas de colores
         color_layout.addWidget(QLabel("Esquema de color:"))
         self.combo_color_ramp = QComboBox()
@@ -132,10 +140,10 @@ class GeoGlyphPanel(QDockWidget):
         )
         layout.addWidget(self.btn_roi)
 
-        btn_importar = QPushButton("Importar detecciones")
-        btn_importar.setToolTip("Importa detecciones en formato GeoJSON o probability map TIFF (próximamente)")
-        btn_importar.setEnabled(False)
-        layout.addWidget(btn_importar)
+        # Importar anotaciones en GeoJson
+        self.btn_importar_geojson = QPushButton("Importar anotaciones")
+        self.btn_importar_geojson.setToolTip("Importa anotaciones en formato GeoJSON")
+        layout.addWidget(self.btn_importar_geojson)
 
         # Exportar anotaciones aprobadas en GeoJson
         self.btn_exportar_geojson = QPushButton("Exportar anotaciones")
