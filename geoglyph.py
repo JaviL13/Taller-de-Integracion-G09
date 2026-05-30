@@ -41,6 +41,7 @@ from .color_ramp_worker import ColorRampWorker  # TIGS-S5-04
 from .decorrelation_dialog import DecorrelationStretchDialog
 from .geoglyph_dialog import GeoGlyphDialog
 from .geoglyph_panel import GeoGlyphPanel  # Se importa el panel con los botones
+from .health_worker import HealthWorker  # TIGS-91
 from .http_worker import EnhanceWorker  # ← nuevo en TIGS-42
 from .infer_worker import InferWorker  # TIGS-53
 from .raster_crop import extract_raster_crop, extract_raster_pixels  # TIGS-53, TIGS-70
@@ -82,6 +83,7 @@ class GeoGlyph:
         # tras migrar el GPKG temporal a la carpeta del proyecto guardado.
         self._suppress_save_handler = False
         self._split_view = None  # TIGS-100: manager de la vista dividida
+        self.health_worker = None
 
     def tr(self, message):
         return QCoreApplication.translate("GeoGlyph", message)
@@ -178,6 +180,7 @@ class GeoGlyph:
         self._cargar_tabla_poligonos()
 
         # Agregar el panel a QGIS (lado derecho por defecto)
+        self._iniciar_health_check()
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.panel)
         self.panel.show()  # Fuerza visibilidad al cargar/recargar (evita que QGIS restaure estado "oculto")
 
@@ -220,6 +223,12 @@ class GeoGlyph:
         if self._infer_worker is not None and self._infer_worker.isRunning():
             self._infer_worker.quit()
             self._infer_worker.wait()
+
+        # TIGS-91
+        if self._health_worker is not None:
+            self._health_worker.stop()
+            self._health_worker.quit()
+            self._health_worker.wait()
 
         # TIGS-70: idem para el worker de SAM.
         if self._sam_worker is not None and self._sam_worker.isRunning():
@@ -1410,3 +1419,22 @@ class GeoGlyph:
         # TIGS-87: mostrar historial completo de notas del polígono seleccionado
         self._actualizar_historial_notas(fid)
         self.panel.input_notas.clear()
+
+    def _iniciar_health_check(self):
+        # Inicia el polling periódico al endpoint GET/health.
+        self._health_worker = HealthWorker(
+            base_url="http://127.0.0.1:8000",
+            interval_seconds=10,
+        )
+        self._health_worker.backend_up.connect(self._on_backend_up)
+        self._health_worker.backend_down.connect(self._on_backend_down)
+        self._health_worker.start()
+
+    def _on_backend_up(self):
+        # Oculta el banner cuando el backend responde.
+        self.panel.lbl_backend_status.setVisible(False)
+
+    def _on_backend_down(self, msg: str):
+        # Muestra el banner cuando el backend no responde
+        self.panel.lbl_backend_status.setText("⚠ Backend no disponible")
+        self.panel.lbl_backend_status.setVisible(True)
