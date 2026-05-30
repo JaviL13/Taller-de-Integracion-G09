@@ -9,12 +9,6 @@
 
 # -*- coding: utf-8 -*-
 
-from qgis.core import QgsProject
-from qgis.gui import QgsMapCanvas
-from qgis.PyQt.QtCore import Qt
-from qgis.PyQt.QtWidgets import QDockWidget, QLabel, QSizePolicy, QVBoxLayout, QWidget
-
-
 # Crea y gestiona el panel acoplable con el segundo canvas para la vista dividida.
 class SplitViewManager:
     # Necesito de geoglyph.py:
@@ -35,6 +29,10 @@ class SplitViewManager:
 
     # Lógica para activar la split view
     def activar(self):
+
+        from qgis.gui import QgsMapCanvas
+        from qgis.PyQt.QtCore import Qt
+        from qgis.PyQt.QtWidgets import QDockWidget, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
         if self._activo:  # Si ya está activo, solo traer el panel al frente.
             if self._dock is not None:
@@ -177,6 +175,8 @@ class SplitViewManager:
     # Capas del canvas secundario
     # Carga en el canvas secundario las mismas capas del proyecto.
     def _sincronizar_capas(self):
+        from qgis.core import QgsProject
+
         if self._canvas_secundario is None:
             return
 
