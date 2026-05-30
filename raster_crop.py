@@ -37,6 +37,7 @@ from qgis.core import (
 
 MAX_ROI_PIXELS = 2048
 
+
 def extract_raster_crop(layer: QgsRasterLayer, rect: QgsRectangle) -> dict:
     """Extrae los metadatos del recorte de un raster dada una ROI.
 
