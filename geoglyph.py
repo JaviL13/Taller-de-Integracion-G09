@@ -48,6 +48,7 @@ from .raster_crop import extract_raster_crop, extract_raster_pixels  # TIGS-53, 
 from .resources import *  # noqa: F403, F401
 from .roi_select_tool import RectangularROITool  # TIGS-53
 from .sam_client import SamWorker  # TIGS-70: worker para ejecutar SAM real
+from .split_view_manager import SplitViewManager  # TIGS-100: vista dividida
 
 
 class GeoGlyph:
@@ -81,6 +82,7 @@ class GeoGlyph:
         # Guard para evitar recursión infinita cuando reescribimos el proyecto
         # tras migrar el GPKG temporal a la carpeta del proyecto guardado.
         self._suppress_save_handler = False
+        self._split_view = None  # TIGS-100: manager de la vista dividida
         self.health_worker = None
 
     def tr(self, message):
@@ -139,6 +141,11 @@ class GeoGlyph:
 
         # TIGS-53: botón para seleccionar un ROI rectangular y enviarlo al backend
         self.panel.btn_roi.clicked.connect(self._activar_herramienta_roi)
+
+        # TIGS-100: botones de split view
+        self.panel.btn_side_by_side.clicked.connect(self._toggle_split_view)
+        self.panel.btn_sync.clicked.connect(self._toggle_sincronizacion)
+
         # ── TIGS-64: botones aprobar / rechazar / pendiente ──────────────
         self.panel.btn_aprobar.clicked.connect(self._aprobar_seleccion)
         self.panel.btn_rechazar.clicked.connect(self._rechazar_seleccion)
@@ -1298,6 +1305,58 @@ class GeoGlyph:
         self._infer_worker.finished.connect(self._on_infer_ok)
         self._infer_worker.error.connect(self._on_infer_error)
         self._infer_worker.start()
+
+    # TIGS-100: Vista dividida (Split View)
+    # Activa o desactiva la vista dividida al hacer clic en el botón.
+    def _toggle_split_view(self):
+        if self.panel is None:
+            return
+
+        if self._split_view is None:
+            self._split_view = SplitViewManager(self.iface)  # Crear el manager la primera vez que se activa.
+            self._split_view._on_ventana_cerrada_callback = self._on_split_view_cerrado
+
+        if self._split_view.esta_activo():
+            self._split_view.desactivar()  # Si el split view está activo, desactivarlo.
+            self.panel.btn_side_by_side.setText("Activar Vista Side-by-Side")
+            # Deshabilitar el botón de sincronización porque ya no hay dos canvas activos.
+            self.panel.btn_sync.setEnabled(False)
+
+        else:
+            # Si el split view no está activo, activarlo.
+            self._split_view.activar()
+            self.panel.btn_side_by_side.setText("Desactivar Vista Side-by-Side")
+            # Habilitar el botón de sincronización ahora que hay dos canvas.
+            self.panel.btn_sync.setEnabled(True)
+            self.panel.btn_sync.setText("Sincronización: ON")
+
+    # Activa o desactiva la sincronización de zoom/pan entre los canvas.
+    def _toggle_sincronizacion(self):
+
+        if self.panel is None or self._split_view is None:
+            return
+
+        if not self._split_view.esta_activo():
+            return
+
+        # Leer el estado actual del botón para saber si hay que activar o desactivar.
+        sincronizado_actualmente = "ON" in self.panel.btn_sync.text()
+
+        if sincronizado_actualmente:
+            # Decía ON, entonces al apretar de nuevo, apago la sincronización.
+            self._split_view.set_sincronizacion(False)
+            self.panel.btn_sync.setText("Sincronización: OFF")
+        else:
+            # Decía OFF, entonces al apretar de nuevo, enciendo la sincronización.
+            self._split_view.set_sincronizacion(True)
+            self.panel.btn_sync.setText("Sincronización: ON")
+
+    # Callback para cuando el usuario cierra la ventana secundaria del split view.
+    def _on_split_view_cerrado(self):
+        if self.panel is None:
+            return
+        self.panel.btn_side_by_side.setText("Activar Vista Side-by-Side")
+        self.panel.btn_sync.setEnabled(False)
 
     # TIGS 83: Métodos para la tabla de polígonos ─────────────────────────────────
 
