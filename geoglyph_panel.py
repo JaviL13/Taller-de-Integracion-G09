@@ -264,7 +264,22 @@ class GeoGlyphPanel(QDockWidget):
         poligonos_layout.addWidget(self.table_poligonos)
         self.tabs.addTab(tab_poligonos, "Polígonos")
 
-        self.setWidget(self.tabs)
+        # Banner de estado del backend — visible solo cuando está caído
+        self.lbl_backend_status = QLabel("⚠ Backend no disponible")
+        self.lbl_backend_status.setAlignment(Qt.AlignCenter)
+        self.lbl_backend_status.setStyleSheet(
+            "background-color: #c0392b; color: white; font-weight: bold; padding: 4px; font-size: 11px;"
+        )
+        self.lbl_backend_status.setVisible(False)
+
+        wrapper = QWidget()
+        wrapper_layout = QVBoxLayout()
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.setSpacing(0)
+        wrapper_layout.addWidget(self.lbl_backend_status)
+        wrapper_layout.addWidget(self.tabs)
+        wrapper.setLayout(wrapper_layout)
+        self.setWidget(wrapper)
 
     def _seccion_titulo(self, texto):
         # Crea una etiqueta de título de sección.
