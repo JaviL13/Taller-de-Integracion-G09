@@ -128,9 +128,7 @@ class ColorRampWorker(QThread):
 
                 if arr is None or arr.size == 0:
                     ds = None
-                    self.error.emit(
-                        "La vista actual no contiene píxeles válidos."
-                    )
+                    self.error.emit("La vista actual no contiene píxeles válidos.")
                     return
 
                 nodata = band_obj.GetNoDataValue()
@@ -140,9 +138,7 @@ class ColorRampWorker(QThread):
 
                 if arr.size == 0:
                     ds = None
-                    self.error.emit(
-                        "La vista actual sólo contiene nodata."
-                    )
+                    self.error.emit("La vista actual sólo contiene nodata.")
                     return
 
                 min_val = float(np.nanmin(arr))
@@ -155,7 +151,4 @@ class ColorRampWorker(QThread):
             self.finished.emit(min_val, max_val)
 
         except Exception as e:  # noqa: BLE001
-            self.error.emit(
-                f"Error calculando estadísticas de banda: "
-                f"{type(e).__name__}: {e}"
-            )
+            self.error.emit(f"Error calculando estadísticas de banda: {type(e).__name__}: {e}")

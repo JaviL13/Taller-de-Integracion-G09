@@ -361,20 +361,15 @@ class GeoGlyph:
             layer_extent = layer.extent()
 
             if layer_extent.intersects(canvas_extent):
-
                 intersection = QgsRectangle(canvas_extent)
                 intersection.intersect(layer_extent)
 
-                 # Si la vista contiene toda la imagen:
+                # Si la vista contiene toda la imagen:
                 # usar imagen completa
-                if (
-                    intersection.width() >= layer_extent.width()
-                    and intersection.height() >= layer_extent.height()
-                ):
+                if intersection.width() >= layer_extent.width() and intersection.height() >= layer_extent.height():
                     window = None
 
                 else:
-
                     x_size = layer.width()
                     y_size = layer.height()
 
@@ -383,16 +378,12 @@ class GeoGlyph:
 
                     xoff = max(
                         0,
-                        int(
-                            (intersection.xMinimum() - layer_extent.xMinimum()) / x_res
-                        ),
+                        int((intersection.xMinimum() - layer_extent.xMinimum()) / x_res),
                     )
 
                     yoff = max(
                         0,
-                        int(
-                            (layer_extent.yMaximum() - intersection.yMaximum()) / y_res
-                        ),
+                        int((layer_extent.yMaximum() - intersection.yMaximum()) / y_res),
                     )
 
                     xsize = min(
@@ -413,8 +404,13 @@ class GeoGlyph:
                     )
 
         # Guardar contexto para el callback (evita leer la UI desde el worker).
-        self._color_ramp_context = {"ramp_type": ramp_type, 
-                                    "band": band, "layer": layer, "extent_mode": extent_mode, "window": window,}
+        self._color_ramp_context = {
+            "ramp_type": ramp_type,
+            "band": band,
+            "layer": layer,
+            "extent_mode": extent_mode,
+            "window": window,
+        }
 
         self._color_ramp_worker = ColorRampWorker(src_path, band, min_val=min_val, max_val=max_val, window=window)
         self._color_ramp_worker.progress.connect(self._on_color_ramp_progress)
@@ -494,7 +490,6 @@ class GeoGlyph:
         from qgis.core import QgsRasterLayer
 
         if extent_mode == "Vista actual" and window is not None:
-
             src_path = layer.source()
             if "|" in src_path:
                 src_path = src_path.split("|", 1)[0]
@@ -950,7 +945,6 @@ class GeoGlyph:
             importadas = 0
 
             for feat in data.get("features", []):
-
                 geom_data = feat.get("geometry")
                 props = feat.get("properties", {})
 
