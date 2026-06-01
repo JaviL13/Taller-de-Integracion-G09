@@ -78,8 +78,8 @@ class ColorRampWorker(QThread):
             # Importamos GDAL de forma diferida para que el módulo sea
             # importable en entornos de test sin osgeo instalado.
             try:
-                from osgeo import gdal
                 import numpy as np
+                from osgeo import gdal
 
                 gdal.UseExceptions()
             except ImportError:

@@ -25,13 +25,14 @@
 """
 
 # -*- coding: utf-8 -*-
-import os.path
 import json
+import os.path
+
 import numpy as np
-from qgis.core import QgsGeometry, QgsPointXY, QgsRasterLayer, QgsJsonUtils, QgsRectangle
+from qgis.core import QgsGeometry, QgsJsonUtils, QgsPointXY, QgsRasterLayer, QgsRectangle
 from qgis.PyQt.QtCore import QCoreApplication, QSettings, Qt, QTranslator
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction, QTableWidgetItem, QFileDialog
+from qgis.PyQt.QtWidgets import QAction, QFileDialog, QTableWidgetItem
 from rasterio.transform import from_bounds
 
 from .annotation_manager import AnnotationManager
@@ -486,10 +487,11 @@ class GeoGlyph:
         shader = QgsRasterShader()
         shader.setRasterShaderFunction(color_ramp)
 
-        from qgis.core import QgsRasterLayer
-        from osgeo import gdal
-        import tempfile
         import os
+        import tempfile
+
+        from osgeo import gdal
+        from qgis.core import QgsRasterLayer
 
         if extent_mode == "Vista actual" and window is not None:
 
