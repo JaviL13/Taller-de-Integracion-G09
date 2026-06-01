@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import os
 import tempfile
-import time
 import traceback
 
 from qgis.core import (
@@ -31,7 +30,7 @@ from qgis.gui import QgsMapLayerComboBox
 from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtCore import Qt
 
-from .decorrelation_stretch import decorrelation_stretch
+from .dstretch_worker import DStretchWorker  # TIGS-S5-04: async worker
 
 
 class DecorrelationStretchDialog(QtWidgets.QDialog):
@@ -182,6 +181,9 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
         buttons.rejected.connect(self.reject)
         outer.addWidget(buttons)
 
+        # TIGS-S5-04: referencia al worker async (evita GC prematuro).
+        self._dstretch_worker = None
+
         # Señales
         self.layer_combo.layerChanged.connect(self._on_layer_changed)
         self.extent_combo.currentIndexChanged.connect(self._update_extent_info)
@@ -305,13 +307,17 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
     # -- ejecución ----------------------------------------------------------
 
     def _run_stretch(self):
+        """Valida los parámetros y lanza DStretchWorker en un QThread.
+
+        La UI permanece completamente usable durante el procesamiento.
+        El resultado (nueva capa) se carga en _on_dstretch_done(). (TIGS-S5-04)
+        """
         layer = self.layer_combo.currentLayer()
         if layer is None or not isinstance(layer, QgsRasterLayer):
             QtWidgets.QMessageBox.warning(self, "Falta capa", "Selecciona una capa raster de entrada.")
             return
 
         src = layer.source()
-        # Extrae índices 1-indexados desde el texto "N: nombre"
         try:
             band_indices = tuple(int(c.currentText().split(":", 1)[0]) for c in self.band_combos)
         except ValueError:
@@ -322,14 +328,13 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
             resp = QtWidgets.QMessageBox.question(
                 self,
                 "Bandas repetidas",
-                "Seleccionaste bandas repetidas. El PCA será degenerado.\n¿Deseas continuar de todas formas?",
+                "Seleccionaste bandas repetidas. El PCA será degenerado.\n¿Deseas continuar?",
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                 QtWidgets.QMessageBox.No,
             )
             if resp != QtWidgets.QMessageBox.Yes:
                 return
 
-        # Resolver ventana a procesar
         try:
             window = self._compute_window(layer)
         except Exception as e:
@@ -341,95 +346,114 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
             fd, out = tempfile.mkstemp(suffix="_dstretch.tif", prefix="geoglyph_")
             os.close(fd)
         else:
-            # Si el usuario escribió solo un nombre (sin ruta), GDAL trata el
-            # string como path relativo al cwd de QGIS — que en macOS suele
-            # ser '/' (read-only) y revienta con "Read-only file system".
-            # Normalizamos: agregamos extensión .tif si falta y resolvemos
-            # rutas relativas contra la carpeta del raster de entrada.
             if not out.lower().endswith((".tif", ".tiff")):
                 out += ".tif"
             if not os.path.isabs(out):
                 base_dir = os.path.dirname(src) if src else os.path.expanduser("~")
                 out = os.path.join(base_dir, out)
-            # Validar que la carpeta destino exista y sea escribible.
-            parent = os.path.dirname(out)
-            if not os.path.isdir(parent) or not os.access(parent, os.W_OK):
+            parent_dir = os.path.dirname(out)
+            if not os.path.isdir(parent_dir) or not os.access(parent_dir, os.W_OK):
                 QtWidgets.QMessageBox.warning(
                     self,
                     "Ruta de salida inválida",
-                    f"No se puede escribir en:\n{parent}\n\n"
-                    "Usa el botón 'Examinar…' para elegir una carpeta válida, "
-                    "o escribe una ruta absoluta (ej. "
-                    "/Users/mimac/Desktop/resultado.tif).",
+                    f"No se puede escribir en:\n{parent_dir}\n\n"
+                    "Usa el botón 'Examinar…' para elegir una carpeta válida.",
                 )
                 return
 
-        # UI en modo "procesando"
-        self.status_lbl.setText("Procesando… (esto puede tardar unos segundos)")
-        self.progress.setValue(0)
+        # Guardar metadatos para el callback de finalización.
+        self._src_layer = layer
+        self._band_indices = band_indices
+
+        # UI en modo "procesando" — botón deshabilitado, barra indeterminada.
+        self.findChild(QtWidgets.QDialogButtonBox).setEnabled(False)
+        self.status_lbl.setText("Procesando…")
+        # range(0, 0) → barra pulsante indeterminada hasta que lleguen tiles reales
+        self.progress.setRange(0, 0)
         self.progress.setVisible(True)
         self.setCursor(Qt.WaitCursor)
-        QtWidgets.QApplication.processEvents()
 
-        def _on_progress(done, total):
-            # Llamado desde el bucle de tiles. Actualizamos la barra y
-            # dejamos que Qt procese eventos para que la UI no se congele.
-            pct = int(100 * done / max(total, 1))
-            self.progress.setValue(pct)
-            self.status_lbl.setText(f"Procesando tile {done}/{total} ({pct}%)…")
-            QtWidgets.QApplication.processEvents()
-
-        # Parámetros de reducción de ruido. El spin está en porcentaje (0–5)
-        # y la API espera fracción (0–1), así que dividimos por 100.
         regularization = float(self.reg_spin.value()) / 100.0
         bilateral_d, bilateral_sigma_color, bilateral_sigma_space = self.bilateral_combo.currentData()
 
-        t0 = time.perf_counter()
-        try:
-            info = decorrelation_stretch(
-                src_path=src,
-                dst_path=out,
-                band_indices=band_indices,
-                saturation_pct=float(self.sat_spin.value()),
-                window=window,
-                regularization=regularization,
-                bilateral_d=int(bilateral_d),
-                bilateral_sigma_color=float(bilateral_sigma_color),
-                bilateral_sigma_space=float(bilateral_sigma_space),
-                progress_cb=_on_progress,
-            )
-        except Exception as e:
-            self.unsetCursor()
-            self.status_lbl.setText("")
-            self.progress.setVisible(False)
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Error al aplicar decorrelation stretch",
-                f"{e}\n\n{traceback.format_exc()}",
-            )
-            return
+        self._dstretch_worker = DStretchWorker(
+            src_path=src,
+            dst_path=out,
+            band_indices=band_indices,
+            saturation_pct=float(self.sat_spin.value()),
+            window=window,
+            regularization=regularization,
+            bilateral_d=int(bilateral_d),
+            bilateral_sigma_color=float(bilateral_sigma_color),
+            bilateral_sigma_space=float(bilateral_sigma_space),
+        )
+        self._dstretch_worker.progress.connect(self._on_dstretch_progress)
+        self._dstretch_worker.finished.connect(self._on_dstretch_done)
+        self._dstretch_worker.error.connect(self._on_dstretch_error)
+        self._dstretch_worker.start()
 
-        elapsed = time.perf_counter() - t0
+    def _on_dstretch_progress(self, done: int, total: int) -> None:
+        """Actualiza la barra de progreso con el porcentaje de avance.
+
+        El primer evento con total > 1 indica modo tiled: activamos la barra
+        determinada. En modo in-memory solo llega (0,1)→(1,1), así que la
+        barra pulsante permanece hasta que el worker termina.
+        """
+        if total > 1:
+            # Modo tiled: mostramos porcentaje real
+            self.progress.setRange(0, 100)
+            pct = int(100 * done / total)
+            self.progress.setValue(pct)
+            self.status_lbl.setText(f"Procesando tile {done}/{total} ({pct}%)")
+
+    def _on_dstretch_done(self, out_path: str, info: dict) -> None:
+        """Carga la capa resultante en QGIS y cierra el diálogo."""
         self.unsetCursor()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(100)
         self.progress.setVisible(False)
+        self.findChild(QtWidgets.QDialogButtonBox).setEnabled(True)
 
-        # Carga el resultado como nueva capa georreferenciada
+        src = self._src_layer.source()
+        bi = self._band_indices
         base = os.path.splitext(os.path.basename(src))[0]
-        bi = band_indices
         layer_name = f"{base}_dstretch_{bi[0]}{bi[1]}{bi[2]}"
-        new_layer = QgsRasterLayer(out, layer_name)
+
+        new_layer = QgsRasterLayer(out_path, layer_name)
         if not new_layer.isValid():
             QtWidgets.QMessageBox.critical(
                 self,
                 "Error",
-                f"Se generó el archivo pero QGIS no lo pudo cargar como capa:\n{out}",
+                f"Se generó el archivo pero QGIS no lo pudo cargar:\n{out_path}",
             )
             return
-        QgsProject.instance().addMapLayer(new_layer)
 
-        self.status_lbl.setText(f"Listo: «{layer_name}» ({elapsed:.2f} s, {info['shape'][0]}×{info['shape'][1]} px)")
+        QgsProject.instance().addMapLayer(new_layer)
+        elapsed = info.get("elapsed_s", 0.0)
+        shape = info.get("shape", (0, 0))
+        self.status_lbl.setText(f"Listo: «{layer_name}» ({elapsed:.2f} s, {shape[0]}×{shape[1]} px)")
         self.iface.messageBar().pushSuccess(
             "GeoGlyph",
             f"Decorrelation stretch aplicado en {elapsed:.2f} s — capa: {layer_name}",
         )
         self.accept()
+
+    def _on_dstretch_error(self, msg: str) -> None:
+        """Muestra el error y reactiva la UI para que el usuario pueda reintentar."""
+        self.unsetCursor()
+        self.progress.setRange(0, 100)
+        self.progress.setVisible(False)
+        self.status_lbl.setText("")
+        self.findChild(QtWidgets.QDialogButtonBox).setEnabled(True)
+        QtWidgets.QMessageBox.critical(
+            self,
+            "Error al aplicar decorrelation stretch",
+            f"{msg}\n\n{traceback.format_exc() if msg else ''}",
+        )
+
+    def closeEvent(self, event):
+        """Detiene el worker si el usuario cierra el diálogo durante el procesamiento."""
+        if self._dstretch_worker is not None and self._dstretch_worker.isRunning():
+            self._dstretch_worker.quit()
+            self._dstretch_worker.wait()
+        super().closeEvent(event)
