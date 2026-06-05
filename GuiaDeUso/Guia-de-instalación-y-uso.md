@@ -213,9 +213,6 @@ Para mejorar la visibilidad de los geoglifos:
 2. La tabla mostrará todas las anotaciones guardadas con su estado (`pending`, `approved`, `rejected`), tipo (`ml-annotation`, `human-annotation`) y score de confianza (si aplica).
 3. Para exportar, hacer clic en **Exportar GeoPackage** y seleccionar la ruta de destino.
 
-<!-- CAPTURA 11: Screenshot del panel de GeoGlyph mostrando la tabla de anotaciones con al menos una anotación manual y una de tipo ml-annotation, con sus campos de estado, tipo y score visibles. -->
-![Captura 11 — Tabla de anotaciones con registros de sesión](docs/img/uso_06_tabla_anotaciones.png)
-
 ---
 
 ## 6. Limitaciones conocidas
