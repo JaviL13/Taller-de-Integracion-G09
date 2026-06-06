@@ -596,7 +596,6 @@ class AnnotationManager:
         feature_export = []
 
         for feature in self.layer.getFeatures():
-
             geom_json = json.loads(feature.geometry().asJson())
 
             feature_export.append(
