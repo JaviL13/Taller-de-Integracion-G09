@@ -566,12 +566,12 @@ class AnnotationManager:
 
     # ── Exportar ──────────────────────────────────────────────────────
     def exportar_anotaciones_geojson(self, parent=None) -> str | None:
-        """Exporta todas las anotaciones con status='approved'
-        a un archivo GeoJSON estándar.
+        """Exporta todas las anotaciones a un archivo GeoJSON estándar.
 
         Cada feature incluye:
             - geometría
             - origin
+            - status
             - notas
             - score
             - timestamp"""
@@ -592,23 +592,20 @@ class AnnotationManager:
         if not output_path.endswith((".geojson", ".json")):
             output_path += ".geojson"
 
-        # 2. Obtener solo annotations approved
-        approved_features = []
+        # 2. Obtener todas las anotaciones
+        feature_export = []
 
         for feature in self.layer.getFeatures():
-            status = feature.attribute("status")
-
-            if status != AnnotationState.APPROVED.value:
-                continue
 
             geom_json = json.loads(feature.geometry().asJson())
 
-            approved_features.append(
+            feature_export.append(
                 {
                     "type": "Feature",
                     "geometry": geom_json,
                     "properties": {
                         "origin": (None if feature.attribute("origin") == NULL else str(feature.attribute("origin"))),
+                        "status": (None if feature.attribute("status") == NULL else str(feature.attribute("status"))),
                         "notas": self.leer_historial_notas(feature.id()),
                         "score": (None if feature.attribute("score") == NULL else float(feature.attribute("score"))),
                         "timestamp": (
@@ -621,7 +618,7 @@ class AnnotationManager:
         # 3. Construir FeatureCollection GeoJSON
         geojson = {
             "type": "FeatureCollection",
-            "features": approved_features,
+            "features": feature_export,
         }
 
         # 4. Guardar archivo
