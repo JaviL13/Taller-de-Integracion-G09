@@ -969,8 +969,16 @@ class GeoGlyph:
                 if not nueva.isValid():
                     continue
 
-                # aprobar automáticamente si venía aprobado
-                manager.aprobar_anotacion(nueva.id())
+                # restaurar estado original de la anotacion
+                status = props.get("status", "pending")
+
+                if status == "approved":
+                    manager.aprobar_anotacion(nueva.id())
+
+                elif status == "rejected":
+                    manager.rechazar_anotacion(nueva.id())
+
+                # pending queda tal como fue creada
 
                 # restaurar notas si existen
                 notas = props.get("notas", [])
