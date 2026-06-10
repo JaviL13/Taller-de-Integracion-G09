@@ -166,8 +166,8 @@ class GeoGlyphPanel(QDockWidget):
 
         # Tabla de polígonos
         self.table_poligonos = QTableWidget()
-        self.table_poligonos.setColumnCount(3)
-        self.table_poligonos.setHorizontalHeaderLabels(["Estado", "Origen", "Score"])
+        self.table_poligonos.setColumnCount(4)
+        self.table_poligonos.setHorizontalHeaderLabels(["ID", "Estado", "Origen", "Score"])
         poligonos_layout.addWidget(self.table_poligonos)
         self.tabs.addTab(tab_poligonos, "Polígonos")
 

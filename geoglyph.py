@@ -1614,8 +1614,9 @@ class GeoGlyph:
 
             row = self.panel.table_poligonos.rowCount()  # Agregar fila
             self.panel.table_poligonos.insertRow(row)
-            self.panel.table_poligonos.setItem(row, 0, QTableWidgetItem(estado))
-            self.panel.table_poligonos.setItem(row, 1, QTableWidgetItem(origen))
+            self.panel.table_poligonos.setItem(row, 0, QTableWidgetItem(str(feature.id())))
+            self.panel.table_poligonos.setItem(row, 1, QTableWidgetItem(estado))
+            self.panel.table_poligonos.setItem(row, 2, QTableWidgetItem(origen))
             if score is None or str(score) == "NULL":  # Esto es para cuando el score es de tipo QVariant
                 score_texto = "—"
             else:
@@ -1623,7 +1624,7 @@ class GeoGlyph:
                     score_texto = f"{float(score):.2f}"
                 except (ValueError, TypeError):
                     score_texto = "—"
-            self.panel.table_poligonos.setItem(row, 2, QTableWidgetItem(score_texto))
+            self.panel.table_poligonos.setItem(row, 3, QTableWidgetItem(score_texto))
 
             self._fids_tabla.append(feature.id())  # Guardar IDs en la misma posición que la fila
 
