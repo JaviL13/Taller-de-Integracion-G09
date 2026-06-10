@@ -289,7 +289,6 @@ class GeoGlyphPanel(QDockWidget):
         self.btn_pendiente.setEnabled(False)
         layout_anot.addWidget(self.btn_pendiente)
 
-
         # Banner de estado del backend — visible solo cuando está caído
         self.lbl_backend_status = QLabel("⚠ Backend no disponible")
         self.lbl_backend_status.setAlignment(Qt.AlignCenter)
