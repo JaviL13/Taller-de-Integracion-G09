@@ -122,109 +122,6 @@ class GeoGlyphPanel(QDockWidget):
 
         layout.addWidget(self._separador())
 
-        # Anotaciones
-        layout.addWidget(self._seccion_titulo(" Anotaciones"))
-
-        # Botón para dibujar el polígono
-        self.btn_dibujar = QPushButton("Dibujar polígono")
-        self.btn_dibujar.setToolTip(
-            "Activa la herramienta de dibujo: clic izquierdo agrega vértices, clic derecho cierra el polígono"
-        )
-        layout.addWidget(self.btn_dibujar)
-
-        # TIGS-53: botón para seleccionar un ROI rectangular y enviarlo al
-        # backend (POST /infer). Se ubica junto a "Dibujar polígono" porque
-        # ambos botones activan herramientas de selección sobre el canvas.
-        self.btn_roi = QPushButton("Seleccionar ROI (rect)")
-        self.btn_roi.setToolTip(
-            "Activa la herramienta de selección rectangular: "
-            "arrastra para definir un ROI y enviar a /infer en el backend"
-        )
-        layout.addWidget(self.btn_roi)
-
-        # Importar anotaciones en GeoJson
-        self.btn_importar_geojson = QPushButton("Importar anotaciones")
-        self.btn_importar_geojson.setToolTip("Importa anotaciones en formato GeoJSON")
-        layout.addWidget(self.btn_importar_geojson)
-
-        # Exportar anotaciones aprobadas en GeoJson
-        self.btn_exportar_geojson = QPushButton("Exportar anotaciones")
-        self.btn_exportar_geojson.setToolTip("Exporta las anotaciones aprobadas en formato GeoJSON")
-        layout.addWidget(self.btn_exportar_geojson)
-
-        # Exportar la capa realzada como GeoTIFF
-        self.btn_exportar = QPushButton("Exportar Capa Realzada")
-        # Tooltip que explica qué hace el botón
-        self.btn_exportar.setToolTip("Guarda la capa realzada activa como archivo GeoTIFF")
-        # Habilitado para hacerle clic
-        self.btn_exportar.setEnabled(True)
-        layout.addWidget(self.btn_exportar)
-
-        layout.addWidget(self._separador())
-
-        # Estado de anotación (TIGS-64)
-        # Sección que permite aprobar o rechazar la anotación seleccionada
-        # en el mapa. Los botones quedan deshabilitados hasta que el usuario
-        # selecciona al menos un feature en la capa annotations (la
-        # habilitación la maneja geoglyph.py vía la señal selectionChanged).
-        layout.addWidget(self._seccion_titulo(" Estado de anotación"))
-
-        # Label que muestra cuántas anotaciones hay seleccionadas. Sirve de
-        # feedback inmediato para que el usuario sepa por qué los botones
-        # están deshabilitados (porque no hay nada seleccionado).
-        self.lbl_seleccion = QLabel("Selección actual: 0 anotaciones")
-        self.lbl_seleccion.setStyleSheet("color: gray; font-size: 10px; margin-left: 4px;")
-        layout.addWidget(self.lbl_seleccion)
-
-        # Label para mostrar el score de confianza de la detección
-        # El valor se actualiza desde geoglyph.py con el resultado del backend
-        self.lbl_confianza = QLabel("Confianza: —")
-        self.lbl_confianza.setStyleSheet("color: gray; font-size: 10px; margin-left: 4px;")
-        layout.addWidget(self.lbl_confianza)
-
-        # TIGS-87: Historial de notas con trazabilidad ──────────────────────
-        # Tabla que muestra el historial completo de notas del polígono
-        # seleccionado, ordenadas cronológicamente (más antigua arriba).
-        layout.addWidget(QLabel("Historial de notas:"))
-        self.table_historial_notas = QTableWidget()
-        self.table_historial_notas.setColumnCount(5)
-        self.table_historial_notas.setHorizontalHeaderLabels(["Fecha", "Nota", "Estado", "Origen", "Score"])
-        self.table_historial_notas.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table_historial_notas.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table_historial_notas.setAlternatingRowColors(True)
-        self.table_historial_notas.horizontalHeader().setStretchLastSection(True)
-        self.table_historial_notas.setMaximumHeight(130)
-        self.table_historial_notas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        layout.addWidget(self.table_historial_notas)
-
-        # Campo para agregar una nota nueva (no sobreescribe las anteriores)
-        self.input_notas = QLineEdit()
-        self.input_notas.setPlaceholderText("Agregar nota ...")
-        layout.addWidget(self.input_notas)
-        self.btn_agregar_nota = QPushButton("Agregar nota")
-        self.btn_agregar_nota.setToolTip(
-            "Guarda la nota en el historial del polígono seleccionado (no elimina notas anteriores)"
-        )
-        self.btn_agregar_nota.setEnabled(False)
-        layout.addWidget(self.btn_agregar_nota)
-
-        self.btn_aprobar = QPushButton("Aprobar")
-        self.btn_aprobar.setToolTip("Marca la anotación seleccionada como aprobada (verde)")
-        self.btn_aprobar.setEnabled(False)
-        layout.addWidget(self.btn_aprobar)
-
-        self.btn_rechazar = QPushButton("Rechazar")
-        self.btn_rechazar.setToolTip("Marca la anotación seleccionada como rechazada (rojo)")
-        self.btn_rechazar.setEnabled(False)
-        layout.addWidget(self.btn_rechazar)
-
-        self.btn_pendiente = QPushButton("Pendiente")
-        self.btn_pendiente.setToolTip("Devuelve la anotación seleccionada al estado pendiente (naranja)")
-        self.btn_pendiente.setEnabled(False)
-        layout.addWidget(self.btn_pendiente)
-
-        layout.addWidget(self._separador())
-
         # Inferencia ML
         layout.addWidget(self._seccion_titulo(" Inferencia ML"))
 
@@ -273,6 +170,125 @@ class GeoGlyphPanel(QDockWidget):
         self.table_poligonos.setHorizontalHeaderLabels(["Estado", "Origen", "Score"])
         poligonos_layout.addWidget(self.table_poligonos)
         self.tabs.addTab(tab_poligonos, "Polígonos")
+
+        # TAB 3 - Anotaciones
+        tab_anotaciones = QWidget()
+        anotaciones_layout = QVBoxLayout()
+        tab_anotaciones.setLayout(anotaciones_layout)
+
+        scroll_anot = QScrollArea()
+        scroll_anot.setWidgetResizable(True)
+
+        container_anot = QWidget()
+        layout_anot = QVBoxLayout()
+        layout_anot.setAlignment(Qt.AlignTop)
+
+        container_anot.setLayout(layout_anot)
+        scroll_anot.setWidget(container_anot)
+
+        anotaciones_layout.addWidget(scroll_anot)
+
+        self.tabs.addTab(tab_anotaciones, "Anotaciones")
+        layout_anot.addWidget(self._seccion_titulo(" Anotaciones"))
+
+        # Botón para dibujar el polígono
+        self.btn_dibujar = QPushButton("Dibujar polígono")
+        self.btn_dibujar.setToolTip(
+            "Activa la herramienta de dibujo: clic izquierdo agrega vértices, clic derecho cierra el polígono"
+        )
+        layout_anot.addWidget(self.btn_dibujar)
+
+        # TIGS-53: botón para seleccionar un ROI rectangular y enviarlo al
+        # backend (POST /infer). Se ubica junto a "Dibujar polígono" porque
+        # ambos botones activan herramientas de selección sobre el canvas.
+        self.btn_roi = QPushButton("Seleccionar ROI (rect)")
+        self.btn_roi.setToolTip(
+            "Activa la herramienta de selección rectangular: "
+            "arrastra para definir un ROI y enviar a /infer en el backend"
+        )
+        layout_anot.addWidget(self.btn_roi)
+
+        # Importar anotaciones en GeoJson
+        self.btn_importar_geojson = QPushButton("Importar anotaciones")
+        self.btn_importar_geojson.setToolTip("Importa anotaciones en formato GeoJSON")
+        layout_anot.addWidget(self.btn_importar_geojson)
+
+        # Exportar anotaciones aprobadas en GeoJson
+        self.btn_exportar_geojson = QPushButton("Exportar anotaciones")
+        self.btn_exportar_geojson.setToolTip("Exporta las anotaciones aprobadas en formato GeoJSON")
+        layout_anot.addWidget(self.btn_exportar_geojson)
+
+        # Exportar la capa realzada como GeoTIFF
+        self.btn_exportar = QPushButton("Exportar Capa Realzada")
+        # Tooltip que explica qué hace el botón
+        self.btn_exportar.setToolTip("Guarda la capa realzada activa como archivo GeoTIFF")
+        # Habilitado para hacerle clic
+        self.btn_exportar.setEnabled(True)
+        layout_anot.addWidget(self.btn_exportar)
+
+        layout_anot.addWidget(self._separador())
+
+        # Estado de anotación (TIGS-64)
+        # Sección que permite aprobar o rechazar la anotación seleccionada
+        # en el mapa. Los botones quedan deshabilitados hasta que el usuario
+        # selecciona al menos un feature en la capa annotations (la
+        # habilitación la maneja geoglyph.py vía la señal selectionChanged).
+        layout_anot.addWidget(self._seccion_titulo(" Estado de anotación"))
+
+        # Label que muestra cuántas anotaciones hay seleccionadas. Sirve de
+        # feedback inmediato para que el usuario sepa por qué los botones
+        # están deshabilitados (porque no hay nada seleccionado).
+        self.lbl_seleccion = QLabel("Selección actual: 0 anotaciones")
+        self.lbl_seleccion.setStyleSheet("color: gray; font-size: 10px; margin-left: 4px;")
+        layout_anot.addWidget(self.lbl_seleccion)
+
+        # Label para mostrar el score de confianza de la detección
+        # El valor se actualiza desde geoglyph.py con el resultado del backend
+        self.lbl_confianza = QLabel("Confianza: —")
+        self.lbl_confianza.setStyleSheet("color: gray; font-size: 10px; margin-left: 4px;")
+        layout_anot.addWidget(self.lbl_confianza)
+
+        # TIGS-87: Historial de notas con trazabilidad ──────────────────────
+        # Tabla que muestra el historial completo de notas del polígono
+        # seleccionado, ordenadas cronológicamente (más antigua arriba).
+        layout_anot.addWidget(QLabel("Historial de notas:"))
+        self.table_historial_notas = QTableWidget()
+        self.table_historial_notas.setColumnCount(5)
+        self.table_historial_notas.setHorizontalHeaderLabels(["Fecha", "Nota", "Estado", "Origen", "Score"])
+        self.table_historial_notas.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table_historial_notas.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_historial_notas.setAlternatingRowColors(True)
+        self.table_historial_notas.horizontalHeader().setStretchLastSection(True)
+        self.table_historial_notas.setMaximumHeight(130)
+        self.table_historial_notas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout_anot.addWidget(self.table_historial_notas)
+
+        # Campo para agregar una nota nueva (no sobreescribe las anteriores)
+        self.input_notas = QLineEdit()
+        self.input_notas.setPlaceholderText("Agregar nota ...")
+        layout_anot.addWidget(self.input_notas)
+        self.btn_agregar_nota = QPushButton("Agregar nota")
+        self.btn_agregar_nota.setToolTip(
+            "Guarda la nota en el historial del polígono seleccionado (no elimina notas anteriores)"
+        )
+        self.btn_agregar_nota.setEnabled(False)
+        layout_anot.addWidget(self.btn_agregar_nota)
+
+        self.btn_aprobar = QPushButton("Aprobar")
+        self.btn_aprobar.setToolTip("Marca la anotación seleccionada como aprobada (verde)")
+        self.btn_aprobar.setEnabled(False)
+        layout_anot.addWidget(self.btn_aprobar)
+
+        self.btn_rechazar = QPushButton("Rechazar")
+        self.btn_rechazar.setToolTip("Marca la anotación seleccionada como rechazada (rojo)")
+        self.btn_rechazar.setEnabled(False)
+        layout_anot.addWidget(self.btn_rechazar)
+
+        self.btn_pendiente = QPushButton("Pendiente")
+        self.btn_pendiente.setToolTip("Devuelve la anotación seleccionada al estado pendiente (naranja)")
+        self.btn_pendiente.setEnabled(False)
+        layout_anot.addWidget(self.btn_pendiente)
+
 
         # Banner de estado del backend — visible solo cuando está caído
         self.lbl_backend_status = QLabel("⚠ Backend no disponible")
