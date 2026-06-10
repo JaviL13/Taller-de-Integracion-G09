@@ -10,21 +10,20 @@
 
 1. [Descripción general](#1-descripción-general)
 2. [Panel lateral de GeoGlyph](#2-panel-lateral-de-geoglyph)
-3. [Cargar imagen](#3-cargar-imagen)
-4. [Realce visual](#4-realce-visual)
-   - 4.1 [Color Ramp](#41-color-ramp)
-   - 4.2 [Decorrelation Stretch](#42-decorrelation-stretch)
-   - 4.3 [Vista Side-by-Side](#43-vista-side-by-side)
-5. [Anotaciones](#5-anotaciones)
-   - 5.1 [Dibujar polígono](#51-dibujar-polígono)
-   - 5.2 [Seleccionar ROI (rect)](#52-seleccionar-roi-rect)
-   - 5.3 [Importar anotaciones](#53-importar-anotaciones)
-   - 5.4 [Exportar anotaciones](#54-exportar-anotaciones)
-   - 5.5 [Exportar Capa Realzada](#55-exportar-capa-realzada)
-6. [Estado de anotación](#6-estado-de-anotación)
-   - 6.1 [Aprobar, Rechazar o dejar Pendiente](#61-aprobar-rechazar-o-dejar-pendiente)
-   - 6.2 [Historial de notas](#62-historial-de-notas)
-7. [Pestaña Polígonos](#7-pestaña-polígonos)
+3. [Pestaña Principal](#3-pestaña-principal)
+   - 3.1 [Cargar imagen](#31-cargar-imagen)
+   - 3.2 [Realce visual](#32-realce-visual)
+   - 3.3 [Vista Side-by-Side](#33-vista-side-by-side)
+   - 3.4 [Inferencia ML](#34-inferencia-ml)
+4. [Pestaña Anotaciones](#4-pestaña-anotaciones)
+   - 4.1 [Dibujar polígono](#41-dibujar-polígono)
+   - 4.2 [Seleccionar ROI (rect)](#42-seleccionar-roi-rect)
+   - 4.3 [Importar anotaciones](#43-importar-anotaciones)
+   - 4.4 [Exportar anotaciones](#44-exportar-anotaciones)
+   - 4.5 [Exportar Capa Realzada](#45-exportar-capa-realzada)
+   - 4.6 [Estado de anotación](#46-estado-de-anotación)
+   - 4.7 [Historial de notas](#47-historial-de-notas)
+5. [Pestaña Polígonos](#5-pestaña-polígonos)
 
 ---
 
@@ -47,16 +46,21 @@ Las funcionalidades principales son:
 
 ## 2. Panel lateral de GeoGlyph
 
-Al activar el plugin desde el menú **Ráster → GeoGlyph**, se despliega un panel lateral a la derecha de la pantalla de QGIS. Este panel es el punto de entrada para todas las funcionalidades del plugin y está organizado en dos pestañas:
+Al activar el plugin desde el menú **Ráster → GeoGlyph**, se despliega un panel lateral a la derecha de la pantalla de QGIS. Este panel es el punto de entrada para todas las funcionalidades del plugin y está organizado en tres pestañas:
 
-- **Principal:** contiene todas las herramientas de carga, realce, anotación e inferencia.
+- **Principal:** contiene las herramientas de carga de imagen, realce visual e inferencia ML.
+- **Anotaciones:** contiene todas las herramientas de creación, gestión y validación de anotaciones.
 - **Polígonos:** muestra el listado completo de anotaciones creadas con opciones de filtrado.
 
 El panel es acoplable: se puede mover, redimensionar o flotar como ventana independiente según la preferencia del usuario.
 
 ---
 
-## 3. Cargar imagen
+## 3. Pestaña Principal
+
+La pestaña **Principal** agrupa las herramientas de carga de imagen, realce visual e inferencia con el modelo SAM.
+
+### 3.1 Cargar imagen
 
 **Botón:** `Abrir GeoTIFF`
 
@@ -66,9 +70,7 @@ Una vez seleccionado, la imagen se incorpora automáticamente como una capa rás
 
 > **Nota:** El plugin está optimizado para trabajar con ortomosaicos e imágenes de drones. Para archivos de gran tamaño (mayores a 500 MB) se recomienda hacer zoom a la zona de interés antes de aplicar realces.
 
----
-
-## 4. Realce visual
+### 3.2 Realce visual
 
 La sección de **Realce visual** permite mejorar la visibilidad de patrones arqueológicos en la imagen cargada. Incluye dos técnicas de procesamiento de imágenes ampliamente utilizadas en arqueología.
 
@@ -82,13 +84,13 @@ Al cambiar el tipo de realce, las opciones disponibles debajo del menú se actua
 
 Ejecuta el realce seleccionado con los parámetros configurados. El resultado se agrega como una nueva capa en QGIS, preservando la imagen original sin modificarla.
 
-### 4.1 Color Ramp
+#### Color Ramp
 
 Color Ramp asigna una escala de colores a los valores numéricos de una banda del ráster. Es útil para visualizar variaciones de elevación, humedad u otras variables que no son evidentes en la representación original en escala de grises.
 
 **Parámetros disponibles:**
 
-- **Banda:** menú desplegable que permite seleccionar qué banda de la imagen se va a procesar. El número de opciones disponibles depende de las bandas que tenga la imagen cargada (por ejemplo, una imagen RGB tendrá las bandas 1, 2 y 3).
+- **Banda:** menú desplegable que permite seleccionar qué banda de la imagen se va a procesar. El número de opciones depende de las bandas que tenga la imagen cargada (por ejemplo, una imagen RGB tendrá las bandas 1, 2 y 3).
 
 - **Aplicar sobre:** menú desplegable con dos opciones:
   - *Vista actual:* procesa únicamente la región visible en el mapa en ese momento. Es más rápido y se recomienda para exploración.
@@ -100,13 +102,13 @@ Color Ramp asigna una escala de colores a los valores numéricos de una banda de
 
 - **Estiramiento de contraste (Min/Max):** dos campos de texto que permiten definir manualmente los valores mínimo y máximo del rango de color. Si se dejan en blanco (valor *Auto*), el sistema calcula automáticamente los valores a partir de las estadísticas de la imagen.
 
-### 4.2 Decorrelation Stretch
+#### Decorrelation Stretch
 
 Decorrelation Stretch (DStretch) es una técnica de procesamiento de imágenes que amplifica las diferencias entre bandas para revelar variaciones cromáticas que no son visibles a simple vista. Es especialmente útil para identificar geoglifos en terrenos áridos donde el contraste con el entorno es muy sutil.
 
 Al seleccionar **Decorrelation Stretch** en el menú de tipo de realce, se abre automáticamente un panel de configuración con múltiples parámetros avanzados. Consultar la sección correspondiente de la Guía de Instalación y Uso para el detalle completo de opciones.
 
-### 4.3 Vista Side-by-Side
+### 3.3 Vista Side-by-Side
 
 **Botón:** `Activar Vista Side-by-Side`  
 **Botón:** `Sincronización: ON / OFF`
@@ -127,13 +129,23 @@ Cuando la sincronización está activa (**Sincronización: ON**), cualquier movi
 
 > **Nota:** El botón de sincronización solo está habilitado cuando la Vista Side-by-Side está activa. El panel secundario es acoplable: se puede mover a cualquier lado de la ventana de QGIS o flotarlo como ventana independiente.
 
+### 3.4 Inferencia ML
+
+**Botón:** `Ejecutar SAM`
+
+Ejecuta el modelo de segmentación SAM sobre el ROI previamente seleccionado en la pestaña **Anotaciones**. Este botón se habilita automáticamente después de seleccionar un ROI rectangular con la herramienta **Seleccionar ROI (rect)**.
+
+El resultado de la inferencia se guarda automáticamente como una anotación con origen **ml-annotation** y estado **pending**, y aparece en el mapa para su revisión.
+
+> **Nota:** Requiere que el backend de inferencia esté activo. Si no está disponible, el plugin muestra un aviso pero continúa funcionando con todas las demás herramientas sin interrupciones.
+
 ---
 
-## 5. Anotaciones
+## 4. Pestaña Anotaciones
 
-La sección de **Anotaciones** agrupa las herramientas para crear, importar y exportar anotaciones sobre la imagen geoespacial.
+La pestaña **Anotaciones** agrupa todas las herramientas para crear, gestionar y validar anotaciones sobre la imagen geoespacial.
 
-### 5.1 Dibujar polígono
+### 4.1 Dibujar polígono
 
 **Botón:** `Dibujar polígono`
 
@@ -146,7 +158,7 @@ Activa la herramienta de dibujo manual de polígonos sobre el mapa. Permite traz
 
 Una vez cerrado el polígono, la anotación se guarda automáticamente en el GeoPackage local con estado **pending** y origen **human**. El polígono aparece en color naranja sobre el mapa.
 
-### 5.2 Seleccionar ROI (rect)
+### 4.2 Seleccionar ROI (rect)
 
 **Botón:** `Seleccionar ROI (rect)`
 
@@ -155,18 +167,18 @@ Activa la herramienta de selección de una Región de Interés (ROI) rectangular
 **Cómo usarlo:**
 1. Hacer clic en **Seleccionar ROI (rect)**.
 2. Mantener presionado el clic izquierdo y arrastrar sobre el mapa para definir el rectángulo de interés alrededor del geoglifo.
-3. Al soltar el clic, el ROI queda definido y se habilita automáticamente el botón **Ejecutar SAM** en la sección de Inferencia ML.
-4. Hacer clic en **Ejecutar SAM** para enviar la región al modelo y obtener la máscara de segmentación.
+3. Al soltar el clic, el ROI queda definido y se habilita automáticamente el botón **Ejecutar SAM** en la sección de Inferencia ML de la pestaña Principal.
+4. Ir a la pestaña **Principal** y hacer clic en **Ejecutar SAM** para obtener la máscara de segmentación.
 
 > **Nota:** Esta funcionalidad requiere que el backend de inferencia esté activo. Si el backend no está disponible, el plugin mostrará un aviso pero continuará funcionando con todas las demás herramientas sin interrupciones.
 
-### 5.3 Importar anotaciones
+### 4.3 Importar anotaciones
 
 **Botón:** `Importar anotaciones`
 
 Permite importar anotaciones existentes en formato GeoJSON al proyecto actual. Las anotaciones importadas se agregan a la capa de anotaciones con su estado y origen originales preservados.
 
-### 5.4 Exportar anotaciones
+### 4.4 Exportar anotaciones
 
 **Botón:** `Exportar anotaciones`
 
@@ -176,7 +188,7 @@ El archivo exportado incluye para cada anotación: la geometría georreferenciad
 
 > **Nota:** Solo se exportan las anotaciones aprobadas. Las que están en estado pendiente o rechazadas no se incluyen en el archivo exportado.
 
-### 5.5 Exportar Capa Realzada
+### 4.5 Exportar Capa Realzada
 
 **Botón:** `Exportar Capa Realzada`
 
@@ -186,16 +198,12 @@ Al hacer clic, se abre un explorador de archivos para definir la ruta y nombre d
 
 > **Advertencia:** Para imágenes de gran tamaño, este proceso puede tardar varios minutos. Se recomienda exportar solo la vista actual aplicando el realce sobre la región visible en lugar de la imagen completa.
 
----
+### 4.6 Estado de anotación
 
-## 6. Estado de anotación
-
-La sección de **Estado de anotación** muestra información sobre las anotaciones seleccionadas en el mapa y permite gestionar su ciclo de vida.
+Esta sección muestra información sobre las anotaciones seleccionadas en el mapa y permite gestionar su ciclo de vida.
 
 - **Selección actual:** indica cuántas anotaciones están seleccionadas en el mapa en ese momento. Los botones de Aprobar, Rechazar y Pendiente solo se habilitan cuando hay al menos una anotación seleccionada.
 - **Confianza:** muestra el score de confianza del modelo SAM para la anotación seleccionada (entre 0 y 1). Solo aplica para anotaciones de origen ml-annotation. Para anotaciones manuales aparece como —.
-
-### 6.1 Aprobar, Rechazar o dejar Pendiente
 
 **Botón:** `Aprobar`  
 **Botón:** `Rechazar`  
@@ -211,7 +219,7 @@ Los tres estados posibles son:
 
 Los colores se aplican automáticamente sobre los polígonos en el mapa al cambiar el estado.
 
-### 6.2 Historial de notas
+### 4.7 Historial de notas
 
 **Campo de texto:** `Agregar nota ...`  
 **Botón:** `Agregar nota`
@@ -237,7 +245,7 @@ Permite asociar notas de texto a una anotación seleccionada. Cada nota que se a
 
 ---
 
-## 7. Pestaña Polígonos
+## 5. Pestaña Polígonos
 
 La pestaña **Polígonos** ofrece una vista centralizada de todas las anotaciones del proyecto en formato de tabla, permitiendo explorarlas y gestionarlas sin tener que buscarlas manualmente en el mapa.
 
