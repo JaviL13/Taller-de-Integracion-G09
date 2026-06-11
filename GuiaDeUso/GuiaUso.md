@@ -184,11 +184,9 @@ Permite importar anotaciones existentes en formato GeoJSON al proyecto actual. L
 
 **Botón:** `Exportar anotaciones`
 
-Exporta todas las anotaciones con estado **approved** (aprobadas) a un archivo GeoJSON. Al hacer clic, se abre un explorador de archivos para seleccionar la ubicación y nombre del archivo de salida.
+Exporta **todas** las anotaciones (aprobadas, rechazadas y pendientes) a un archivo GeoJSON. Al hacer clic, se abre un explorador de archivos para seleccionar la ubicación y nombre del archivo de salida.
 
 El archivo exportado incluye para cada anotación: la geometría georreferenciada, el origen (human o ml-annotation), las notas asociadas, el score de confianza (si aplica) y la fecha y hora del último cambio.
-
-> **Nota:** Solo se exportan las anotaciones aprobadas. Las que están en estado pendiente o rechazadas no se incluyen en el archivo exportado.
 
 ### 4.5 Exportar Capa Realzada
 
