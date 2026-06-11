@@ -139,6 +139,8 @@ El resultado de la inferencia se guarda automáticamente como una anotación con
 
 > **Nota:** Requiere que el backend de inferencia esté activo. Si no está disponible, el plugin muestra un aviso pero continúa funcionando con todas las demás herramientas sin interrupciones.
 
+> **Nota:** Se recomienda hacer algún realce de imagen para mejorar la calidad de la recomendación.
+
 ---
 
 ## 4. Pestaña Anotaciones
