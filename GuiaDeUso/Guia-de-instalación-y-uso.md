@@ -96,8 +96,6 @@ Copiar la carpeta `plugin/geoglyph/` al directorio de plugins de QGIS según el 
 | macOS | `~/Library/Application Support/QGIS/QGIS3/profiles/default/python/plugins/` |
 | Linux | `~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/` |
 
-<!-- CAPTURA 1: Screenshot del explorador de archivos mostrando la carpeta geoglyph/ correctamente copiada dentro del directorio de plugins de QGIS en el sistema operativo correspondiente. -->
-![Captura 1 — Carpeta del plugin en el directorio de plugins de QGIS](docs/img/install_01_folder.png)
 
 ### Paso 4 — Activar el plugin en QGIS
 
