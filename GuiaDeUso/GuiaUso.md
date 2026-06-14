@@ -158,7 +158,7 @@ Activa la herramienta de dibujo manual de polígonos sobre el mapa. Permite traz
 - **Clic derecho:** cierra el polígono y guarda la anotación. Se requiere un mínimo de 3 vértices.
 - **Tecla Escape:** cancela el dibujo en curso sin guardar nada.
 
-Una vez cerrado el polígono, la anotación se guarda automáticamente en el GeoPackage local con estado **pending** y origen **human**. El polígono aparece en color naranja sobre el mapa.
+Una vez cerrado el polígono, la anotación se guarda automáticamente en el GeoPackage local con estado **pending** y origen **human**. El polígono aparece en color amarillo sobre el mapa.
 
 ### 4.2 Seleccionar ROI (rect)
 
@@ -214,8 +214,8 @@ Estos botones permiten cambiar el estado de las anotaciones seleccionadas en el 
 Los tres estados posibles son:
 
 - **Pending (naranja):** estado inicial de toda anotación recién creada o importada. Indica que aún no ha sido revisada por el arqueólogo.
-- **Approved (verde):** la anotación fue revisada y validada por el arqueólogo. Solo las anotaciones aprobadas se incluyen en la exportación.
-- **Rejected (rojo):** la anotación fue descartada. Se conserva en el GeoPackage para mantener la trazabilidad pero no se exporta.
+- **Approved (verde):** la anotación fue revisada y validada por el arqueólogo.
+- **Rejected (rojo):** la anotación fue descartada. Se conserva en el GeoPackage para mantener la trazabilidad.
 
 Los colores se aplican automáticamente sobre los polígonos en el mapa al cambiar el estado.
 

@@ -211,7 +211,7 @@ Para mejorar la visibilidad de los geoglifos:
 
 1. En el panel de GeoGlyph, ir a la sección **Anotaciones**.
 2. La tabla mostrará todas las anotaciones guardadas con su estado (`pending`, `approved`, `rejected`), tipo (`ml-annotation`, `human-annotation`) y score de confianza (si aplica).
-3. Para exportar, hacer clic en **Exportar GeoPackage** y seleccionar la ruta de destino.
+3. Para exportar, hacer clic en **Exportar Anotaciones** y seleccionar la ruta de destino.
 
 ---
 
