@@ -53,7 +53,7 @@ class InferWorker(QThread):
 
     # Tiempo máximo total que el worker espera al backend. Coherente con
     # EnhanceWorker para que el usuario tenga la misma expectativa de UX.
-    TIMEOUT_SECONDS = 30
+    TIMEOUT_SECONDS = 300
 
     def __init__(
         self,
