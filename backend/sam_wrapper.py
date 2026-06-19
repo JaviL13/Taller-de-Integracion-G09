@@ -1,79 +1,65 @@
 # -*- coding: utf-8 -*-
 """
-sam_wrapper.py — TIGS-70
+sam_wrapper.py
 
-Wrapper para MobileSAM que:
+Wrapper para SAM2 que:
   1. Carga el modelo UNA SOLA VEZ al iniciar el servidor (evita overhead
      de carga por request).
   2. Proporciona una función `run_sam` que recibe una imagen y opcionalmente
      puntos de prompt, y devuelve la máscara binaria y el score de confianza.
-  3. Si no se pasan puntos, usa el punto central de la imagen como prompt
-     automáticamente.
+  3. Si no se pasan puntos, usa una cuadrícula 3×3 como prompt automático.
 
-MobileSAM es más ligero que SAM original pero sigue siendo un modelo
-robusto de segmentación. La API es compatible con la de SAM estándar.
+SAM2 (Segment Anything Model 2) es el sucesor de SAM y MobileSAM, con mejor
+precisión y soporte activo de Meta. La API de SAM2ImagePredictor es compatible
+con la de SamPredictor de versiones anteriores.
 """
 
+import contextlib
 from typing import Optional, Tuple
 
 import numpy as np
 import torch
 
-# Importar MobileSAM. La estructura es:
-#   from mobile_sam import sam_model_registry
-# y luego:
-#   model = sam_model_registry["vit_t"](checkpoint=...)
-# El modelo se puede encontrar en:
-#   https://github.com/ChaoningZhang/MobileSAM
 try:
-    from mobile_sam import SamPredictor, sam_model_registry
+    from sam2.build_sam import build_sam2_hf
+    from sam2.sam2_image_predictor import SAM2ImagePredictor
 except ImportError:
     raise ImportError(
-        "No se pudo importar MobileSAM. Ejecuta pip install -r requirements.txt "
-        "en el backend para instalar mobile-sam y sus dependencias."
+        "No se pudo importar SAM2. Ejecuta pip install -r requirements.txt "
+        "en el backend para instalar sam2 y sus dependencias."
     )
 
-# Ruta al checkpoint del modelo. En producción, el archivo debería estar
-# empaquetado con el backend (p.ej. en una carpeta 'models/').
-# Para pruebas, MobileSAM lo descarga automáticamente.
-MODEL_PATH = None  # None = descargar automáticamente
+# ID del modelo en HuggingFace. Opciones disponibles (de menor a mayor precisión):
+#   "facebook/sam2.1-hiera-tiny"       — más rápido, menos preciso
+#   "facebook/sam2.1-hiera-small"      — equilibrio velocidad/precisión (recomendado)
+#   "facebook/sam2.1-hiera-base-plus"  — más preciso, más lento
+#   "facebook/sam2.1-hiera-large"      — máxima precisión, requiere GPU
+MODEL_HF_ID = "facebook/sam2.1-hiera-small"
 
-
-# Variable global para la instancia del modelo. Se carga al iniciar.
-_sam_model = None
-_sam_predictor = None
-_device = None
+_sam_predictor: Optional[SAM2ImagePredictor] = None
+_device: Optional[torch.device] = None
 
 
 def initialize_sam():
-    """Carga el modelo MobileSAM al iniciar el servidor FastAPI.
+    """Carga el modelo SAM2 al iniciar el servidor FastAPI.
 
-    Esta función debe llamarse UNA SOLA VEZ desde main.py en el lifespan
-    o al inicio del servidor, para evitar cargar el modelo por cada request.
+    Descarga los pesos desde HuggingFace la primera vez (~180MB para hiera-small).
+    Las ejecuciones siguientes usan la caché local de HuggingFace.
     """
-    global _sam_model, _sam_predictor, _device
+    global _sam_predictor, _device
 
-    if _sam_model is not None:
-        return  # Ya está cargado
+    if _sam_predictor is not None:
+        return
 
-    # Seleccionar dispositivo (GPU si está disponible, sino CPU)
     _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[SAM] Usando dispositivo: {_device}")
+    print(f"[SAM2] Usando dispositivo: {_device}")
 
     try:
-        # Cargar el modelo vit_t (version "tiny", más rápida que vit_h)
-        # Los registros disponibles en MobileSAM son típicamente:
-        #   - "vit_t": tiny (más rápido)
-        #   - "vit_b": base
-        #   - "vit_h": huge (más preciso pero lento)
-        model = sam_model_registry["vit_t"](checkpoint=MODEL_PATH)
-        model.to(_device)
-        model.eval()  # Modo inferencia (no se actualizan pesos)
-        _sam_model = model
-        _sam_predictor = SamPredictor(model)
-        print(f"[SAM] Modelo MobileSAM cargado exitosamente en {_device}")
+        model = build_sam2_hf(MODEL_HF_ID, device=str(_device))
+        _sam_predictor = SAM2ImagePredictor(model)
+        print(f"[SAM2] Modelo '{MODEL_HF_ID}' cargado exitosamente en {_device}")
     except Exception as e:
-        raise RuntimeError(f"No se pudo cargar el modelo MobileSAM: {e}") from e
+        raise RuntimeError(f"No se pudo cargar el modelo SAM2: {e}") from e
 
 
 def run_sam(
@@ -81,13 +67,13 @@ def run_sam(
     points: Optional[np.ndarray] = None,
     labels: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, float]:
-    """Ejecuta MobileSAM sobre una imagen con puntos de prompt opcionales.
+    """Ejecuta SAM2 sobre una imagen con puntos de prompt opcionales.
 
     Parámetros:
         image: imagen RGB como np.ndarray de forma (H, W, 3) con valores
                en [0, 255] (uint8) o [0, 1] (float).
         points: opcional, puntos de prompt como np.ndarray de forma (N, 2)
-                con [x, y] en píxeles. Si no se pasa, usa el punto central.
+                con [x, y] en píxeles. Si no se pasa, usa cuadrícula 3×3.
         labels: opcional, etiquetas asociadas a los puntos:
                 1 = foreground (incluir en máscara)
                 0 = background (excluir de máscara)
@@ -96,47 +82,87 @@ def run_sam(
     Retorna:
         (mask, confidence): tupla con:
           - mask: máscara binaria (H, W) uint8 con valores 0 (fondo) o 255 (objeto).
-          - confidence: float en [0, 1] que estima la confianza del modelo.
-                       Se calcula como la media de las probabilidades
-                       de la máscara (score del predictor).
+          - confidence: float en [0, 1], score de confianza del modelo.
     """
-    if _sam_model is None or _sam_predictor is None:
-        raise RuntimeError("El modelo SAM no ha sido inicializado. Llama a initialize_sam() primero.")
+    if _sam_predictor is None:
+        raise RuntimeError("El modelo SAM2 no ha sido inicializado. Llama a initialize_sam() primero.")
 
-    # MobileSAM espera imagen RGB uint8 en [0, 255].
     if image.dtype != np.uint8:
         image = np.clip(image, 0, 255).astype(np.uint8)
 
-    # Si no se pasan puntos, usar cuadrícula 3×3 para mejor cobertura del ROI
+    # box_prompt se usa cuando no hay puntos de usuario (modo automático).
+    box_prompt = None
+
     if points is None:
         h, w = image.shape[:2]
-        xs = [w // 4, w // 2, 3 * w // 4]
-        ys = [h // 4, h // 2, 3 * h // 4]
-        points = np.array([[x, y] for y in ys for x in xs], dtype=np.float32)
-        labels = np.ones(len(points), dtype=np.int32)
+        cx, cy = w // 2, h // 2
 
-    # Si se pasan puntos pero no labels, asumir todos foreground
+        # Foreground: centro más cuatro puntos a 1/8 de distancia del centro.
+        # Cluster compacto para indicar el objeto sin cubrir toda la imagen.
+        fg_pts = np.array(
+            [
+                [cx, cy],
+                [cx - w // 8, cy],
+                [cx + w // 8, cy],
+                [cx, cy - h // 8],
+                [cx, cy + h // 8],
+            ],
+            dtype=np.float32,
+        )
+
+        # Background: esquinas ligeramente interiores (5% del borde).
+        # Decirle a SAM2 que los bordes son fondo fuerza que encuentre el límite
+        # real del objeto en lugar de devolver la imagen completa como máscara.
+        mx, my = max(1, w // 20), max(1, h // 20)
+        bg_pts = np.array(
+            [
+                [mx, my],  # esquina superior-izquierda
+                [w - mx, my],  # esquina superior-derecha
+                [mx, h - my],  # esquina inferior-izquierda
+                [w - mx, h - my],  # esquina inferior-derecha
+            ],
+            dtype=np.float32,
+        )
+
+        points = np.concatenate([fg_pts, bg_pts], axis=0)
+        labels = np.concatenate(
+            [
+                np.ones(len(fg_pts), dtype=np.int32),  # foreground
+                np.zeros(len(bg_pts), dtype=np.int32),  # background
+            ]
+        )
+
+        # Box prompt: zona interior (70% del área) para reforzar dónde está el objeto.
+        pad_x, pad_y = w * 0.15, h * 0.15
+        box_prompt = np.array([pad_x, pad_y, w - pad_x, h - pad_y], dtype=np.float32)
+
     if labels is None:
         labels = np.ones(len(points), dtype=np.int32)
 
-    # Pasar imagen al modelo (MobileSAM espera float32 en [0, 1])
-    try:
-        # Procesar la imagen con el predictor de MobileSAM.
-        _sam_predictor.set_image(image)
+    # En GPU se activa autocast bfloat16 para mejor rendimiento.
+    # En CPU se usa solo inference_mode (autocast bfloat16 no aporta en CPU).
+    autocast_ctx = (
+        torch.autocast("cuda", dtype=torch.bfloat16)
+        if _device is not None and _device.type == "cuda"
+        else contextlib.nullcontext()
+    )
 
-        # Ejecutar predicción con puntos de prompt — 3 candidatos para elegir el mejor
-        masks, scores, logits = _sam_predictor.predict(
-            point_coords=points,
-            point_labels=labels,
-            multimask_output=True,
-        )
-        # Seleccionar la máscara con mayor score
+    try:
+        with torch.inference_mode(), autocast_ctx:
+            _sam_predictor.set_image(image)
+            masks, scores, logits = _sam_predictor.predict(
+                point_coords=points,
+                point_labels=labels,
+                box=box_prompt,
+                multimask_output=True,
+            )
+
         best_idx = int(np.argmax(scores))
         mask_binary = masks[best_idx]
         confidence = float(scores[best_idx])
         mask_output = (mask_binary * 255).astype(np.uint8)
 
     except Exception as e:
-        raise RuntimeError(f"Error durante la inferencia con MobileSAM: {e}") from e
+        raise RuntimeError(f"Error durante la inferencia con SAM2: {e}") from e
 
     return mask_output, confidence

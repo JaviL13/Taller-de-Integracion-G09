@@ -38,6 +38,32 @@ from qgis.core import (
 MAX_ROI_PIXELS = 2048
 
 
+def _stretch_to_uint8(image: np.ndarray) -> np.ndarray:
+    """Convierte un array de cualquier dtype a uint8 usando estiramiento p2–p98.
+
+    Para cada banda se mapea el rango [percentil 2, percentil 98] al rango
+    [0, 255]. Esto preserva el contraste visible de la imagen independientemente
+    del dtype original (uint8, uint16, float32, etc.).
+
+    Bandas con varianza cero (completamente uniformes) se dejan en 0 para evitar
+    división por cero.
+    """
+    if image.dtype == np.uint8:
+        return image
+
+    image = image.astype(np.float32)
+    result = np.zeros_like(image, dtype=np.float32)
+
+    for i in range(image.shape[2]):
+        band = image[:, :, i]
+        p2, p98 = np.percentile(band, (2, 98))
+        rng = p98 - p2
+        if rng > 0:
+            result[:, :, i] = np.clip((band - p2) / rng * 255.0, 0, 255)
+
+    return result.astype(np.uint8)
+
+
 def extract_raster_crop(layer: QgsRasterLayer, rect: QgsRectangle) -> dict:
     """Extrae los metadatos del recorte de un raster dada una ROI.
 
@@ -226,9 +252,10 @@ def extract_raster_pixels(layer: QgsRasterLayer, rect: QgsRectangle) -> np.ndarr
                 )
                 image_array = np.stack([data, data, data], axis=2)
 
-            # Asegurar uint8 para el backend SAM.
-            if image_array.dtype != np.uint8:
-                image_array = np.clip(image_array, 0, 255).astype(np.uint8)
+            # Convertir a uint8 con estiramiento de histograma por percentiles.
+            # Un clip directo a 255 destruye la información en rasters uint16
+            # (valores 256–65535 quedan todos en 255, resultando en imagen blanca).
+            image_array = _stretch_to_uint8(image_array)
 
     except Exception as e:
         raise ValueError(f"Error leyendo píxeles del raster: {e}") from e
