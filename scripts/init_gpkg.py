@@ -196,12 +196,33 @@ CREATE TABLE annotations (
 );
 """
 
+# TIGS-87: Historial de notas por polígono con trazabilidad.
+# Cada fila representa una nota agregada por el arqueólogo (o generada por
+# el modelo) asociada a una anotación concreta. Las notas NUNCA se sobreescriben:
+# cada llamada a agregar_nota() inserta una fila nueva. Eso cumple el requisito
+# de trazabilidad de CENIA: distinguir ml-annotation vs human-annotation y
+# mantener el historial completo con estado, score y timestamp al momento de
+# escribir la nota.
+DDL_ANNOTATION_NOTES = """
+CREATE TABLE annotation_notes (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    annotation_id INTEGER NOT NULL,
+    texto         TEXT    NOT NULL DEFAULT '',
+    origen        TEXT    NOT NULL,
+    estado        TEXT    NOT NULL CHECK(estado IN ('pending','approved','rejected')),
+    score         REAL,
+    timestamp     TEXT    NOT NULL,
+    FOREIGN KEY (annotation_id) REFERENCES annotations(fid)
+);
+"""
+
 # Índices en las FK para acelerar las queries de trazabilidad.
 DDL_INDEXES = [
     "CREATE INDEX idx_detections_session_id ON detections(session_id);",
     "CREATE INDEX idx_annotations_session_id ON annotations(session_id);",
     "CREATE INDEX idx_annotations_detection_id ON annotations(detection_id);",
     "CREATE INDEX idx_annotations_status ON annotations(status);",
+    "CREATE INDEX idx_annotation_notes_annotation_id ON annotation_notes(annotation_id);",
 ]
 
 
@@ -304,6 +325,7 @@ def init_gpkg(path: str, crs_epsg: int = 32719, overwrite: bool = False) -> str:
         cur.executescript(DDL_SESSIONS)
         cur.executescript(DDL_DETECTIONS)
         cur.executescript(DDL_ANNOTATIONS)
+        cur.executescript(DDL_ANNOTATION_NOTES)
 
         for stmt in DDL_INDEXES:
             cur.execute(stmt)

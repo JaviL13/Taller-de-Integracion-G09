@@ -47,12 +47,13 @@ class InferWorker(QThread):
         parent: parent Qt (opcional).
     """
 
+    progress = pyqtSignal(int, int)
     finished = pyqtSignal(int, float, dict)
     error = pyqtSignal(str)
 
     # Tiempo máximo total que el worker espera al backend. Coherente con
     # EnhanceWorker para que el usuario tenga la misma expectativa de UX.
-    TIMEOUT_SECONDS = 30
+    TIMEOUT_SECONDS = 300
 
     def __init__(
         self,
@@ -99,6 +100,7 @@ class InferWorker(QThread):
         excepción a una señal `error(str)` legible. Nunca se propaga una
         excepción fuera del worker.
         """
+        self.progress.emit(0, 1)
         start = time.time()
         try:
             data = json.dumps(self.payload).encode("utf-8")
@@ -118,6 +120,7 @@ class InferWorker(QThread):
                     self.error.emit("Respuesta inesperada del backend (no es JSON válido).")
                     return
 
+                self.progress.emit(1, 1)
                 self.finished.emit(resp.status, elapsed, body)
 
         except urllib.error.HTTPError as e:

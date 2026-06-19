@@ -56,6 +56,7 @@ class SamWorker(QThread):
         parent: parent Qt (opcional).
     """
 
+    progress = pyqtSignal(int, int)
     finished = pyqtSignal(np.ndarray, float)
     error = pyqtSignal(str)
 
@@ -125,6 +126,7 @@ class SamWorker(QThread):
         Toda la lógica de errores está aquí: se traduce cada excepción
         a una señal `error(str)` legible.
         """
+        self.progress.emit(0, 3)
         start = time.time()
 
         try:
@@ -164,6 +166,7 @@ class SamWorker(QThread):
                 data["labels"] = json.dumps(np.asarray(self.labels).tolist())
 
             # 3. Ejecutar POST con httpx
+            self.progress.emit(1, 3)
             with httpx.Client(timeout=self.TIMEOUT_SECONDS) as client:
                 response = client.post(self.url, files=files, data=data)
                 # Tiempo medido para futuros logs de diagnóstico.
@@ -207,6 +210,7 @@ class SamWorker(QThread):
                     confidence = float(body.get("confidence", 0.0))
 
                     # Emitir señal de éxito en el hilo principal
+                    self.progress.emit(3, 3)
                     self.finished.emit(mask_array, confidence)
 
                 except Exception as e:

@@ -21,6 +21,7 @@ class EnhanceWorker(QThread):
         error(str): mensaje de error legible para mostrar en la UI
     """
 
+    progress = pyqtSignal(int, int)
     finished = pyqtSignal(int, float, dict)
     error = pyqtSignal(str)
 
@@ -36,6 +37,7 @@ class EnhanceWorker(QThread):
 
     def run(self):
         """Ejecuta la llamada HTTP. Corre en el hilo secundario."""
+        self.progress.emit(0, 1)
         start = time.time()
         try:
             data = json.dumps(self.payload).encode("utf-8")
@@ -48,6 +50,7 @@ class EnhanceWorker(QThread):
             with urllib.request.urlopen(req, timeout=self.TIMEOUT_SECONDS) as resp:
                 elapsed = time.time() - start
                 body = json.loads(resp.read().decode("utf-8"))
+                self.progress.emit(1, 1)
                 self.finished.emit(resp.status, elapsed, body)
 
         except urllib.error.HTTPError as e:
