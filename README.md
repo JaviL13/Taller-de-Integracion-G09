@@ -366,7 +366,11 @@ pytest tests/test_tigs35.py -v --cov=. --cov-report=term-missing
 ![Imagen 4](data/wireframes/Imagen4.png)
 
 
-## Guía de uso
+## Documentación
 
-Para instrucciones detalladas de instalación y uso del plugin, consulte [GuiaDeUso/Guia-de-instalación-y-uso.md](GuiaDeUso/Guia-de-instalación-y-uso.md).
+| Documento | Descripción |
+|-----------|-------------|
+| [Guía de instalación y uso](GuiaDeUso/Guia-de-instalación-y-uso.md) | Instalación del plugin, configuración del backend y uso básico paso a paso |
+| [Guía de uso detallada](GuiaDeUso/GuiaUso.md) | Flujo completo de anotación, realce de imágenes e inferencia ML con capturas |
+| [Transferencia técnica](GuiaDeUso/TRANSFERENCIA_TECNICA.md) | Arquitectura del sistema, decisiones de diseño y guía para el equipo receptor |
 
