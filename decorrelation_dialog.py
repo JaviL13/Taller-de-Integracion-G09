@@ -272,6 +272,8 @@ class DecorrelationStretchDialog(QtWidgets.QDialog):
                 name = layer.bandName(i)
             except Exception:
                 name = f"Banda {i}"
+            if "alpha" in name.lower():
+                continue
             items.append(f"{i}: {name}")
         for i, combo in enumerate(self.band_combos):
             combo.blockSignals(True)

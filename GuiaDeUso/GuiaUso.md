@@ -104,9 +104,46 @@ Color Ramp asigna una escala de colores a los valores numéricos de una banda de
 
 #### Decorrelation Stretch
 
-Decorrelation Stretch (DStretch) es una técnica de procesamiento de imágenes que amplifica las diferencias entre bandas para revelar variaciones cromáticas que no son visibles a simple vista. Es especialmente útil para identificar geoglifos en terrenos áridos donde el contraste con el entorno es muy sutil.
+Decorrelation Stretch (DStretch) es una técnica de procesamiento de imágenes que amplifica las diferencias cromáticas entre bandas aplicando un Análisis de Componentes Principales (PCA). El resultado revela variaciones de color que no son visibles a simple vista, lo que la hace especialmente útil para identificar geoglifos en terrenos áridos donde el contraste con el entorno es muy sutil.
 
-Al seleccionar **Decorrelation Stretch** en el menú de tipo de realce, se abre automáticamente un panel de configuración con múltiples parámetros avanzados. Consultar la sección correspondiente de la Guía de Instalación y Uso para el detalle completo de opciones.
+Al seleccionar **Decorrelation Stretch** en el menú de tipo de realce y hacer clic en **Aplicar Realce**, se abre un panel movible con las siguientes secciones:
+
+**Capa raster de entrada**
+
+Permite elegir la imagen sobre la que se aplicará el realce. El menú desplegable muestra todas las capas ráster cargadas en el proyecto. Si la imagen no está cargada aún, el botón **… o abrir GeoTIFF desde disco** permite seleccionarla directamente desde el explorador de archivos.
+
+**Bandas de entrada para el PCA**
+
+Tres menús desplegables (**Canal 1**, **Canal 2**, **Canal 3**) permiten elegir qué bandas de la imagen alimentan el algoritmo PCA. Por defecto se asignan las tres primeras bandas disponibles. Elegir bandas repetidas produce un PCA degenerado; el sistema lo avisa y pide confirmación antes de continuar.
+
+**Región a procesar**
+
+Menú desplegable con dos opciones:
+- *Vista actual del mapa (rápido):* procesa únicamente la región visible en el mapa en ese momento. Recomendado para exploración iterativa.
+- *Raster completo (procesamiento por tiles):* procesa toda la imagen dividiéndola en teselas para mantener el uso de memoria acotado. Adecuado para ortomosaicos grandes.
+
+Debajo del menú se muestra el tamaño estimado de la región en píxeles y el modo de procesamiento que se utilizará (memoria directa o por teselas).
+
+**Parámetros**
+
+- **Saturación (%):** porcentaje de recorte por percentil aplicado al estiramiento final de color. Valores típicos entre 0,5 y 2,0. Un valor de 0 desactiva el recorte. Por defecto: 1,0 %.
+
+**Reducción de ruido**
+
+Controles opcionales para mitigar el ruido de color ("rainbow noise") que puede aparecer en zonas de baja varianza:
+
+- **Suavizado PCA:** regularización aplicada al PCA para limitar la amplificación de los ejes con poca varianza, que es donde se concentra el ruido del sensor. El valor se expresa en porcentaje (0–5 %). Un valor de 0 aplica el DStretch canónico sin regularización. Por defecto: 1,0 %.
+- **Filtro bilateral:** filtro post-procesamiento que suaviza zonas planas conservando los bordes de los geoglifos. Las opciones son *Desactivado*, *Suave*, *Medio* y *Fuerte*, correspondientes a kernels de tamaño creciente. Por defecto: Desactivado.
+
+**Archivo de salida**
+
+Campo de texto para definir la ruta del archivo GeoTIFF resultante. Si se deja vacío, se genera automáticamente un archivo temporal. El botón **…** abre un explorador de archivos para elegir la ubicación.
+
+**Botón Aplicar**
+
+Lanza el procesamiento en segundo plano. La barra de progreso indica el avance: en modo tiled muestra el porcentaje por teselas completadas; en modo memoria permanece en modo pulsante hasta que termina. La interfaz de QGIS permanece usable durante todo el proceso. Al finalizar, la capa resultante se agrega automáticamente al proyecto con el nombre `<imagen>_dstretch_<banda1><banda2><banda3>`.
+
+> **Nota:** Para imágenes grandes se recomienda usar primero la opción *Vista actual del mapa* para ajustar los parámetros, y luego aplicar sobre el *Raster completo* una vez encontrada la configuración adecuada.
 
 ### 3.3 Vista Side-by-Side
 
