@@ -130,12 +130,6 @@ class GeoGlyphPanel(QDockWidget):
         self.btn_ejecutar_sam.setEnabled(False)
         layout.addWidget(self.btn_ejecutar_sam)
 
-        # Boton para renderizar
-        self.btn_infer = QPushButton("Renderizar segmentación")
-        self.btn_infer.setToolTip("Llama a POST /infer y renderiza los polígonos resultantes como capa vectorial")
-        self.btn_infer.setEnabled(True)
-        layout.addWidget(self.btn_infer)
-
         # Label de estado de la última llamada HTTP
         self.lbl_status = QLabel("Estado: —")
         self.lbl_status.setWordWrap(True)
