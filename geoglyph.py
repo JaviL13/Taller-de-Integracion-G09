@@ -29,7 +29,7 @@ import json
 import os.path
 
 import numpy as np
-from qgis.core import QgsGeometry, QgsJsonUtils, QgsPointXY, QgsRasterLayer, QgsRectangle
+from qgis.core import QgsJsonUtils, QgsRasterLayer, QgsRectangle
 from qgis.PyQt.QtCore import QCoreApplication, QSettings, Qt, QTranslator
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QFileDialog, QTableWidgetItem
@@ -44,7 +44,6 @@ from .geoglyph_dialog import GeoGlyphDialog
 from .geoglyph_panel import GeoGlyphPanel  # Se importa el panel con los botones
 from .health_worker import HealthWorker  # TIGS-91
 from .http_worker import EnhanceWorker  # ← nuevo en TIGS-42
-from .infer_worker import InferWorker  # TIGS-53
 from .raster_crop import extract_raster_crop, extract_raster_pixels  # TIGS-53, TIGS-70
 from .resources import *  # noqa: F403, F401
 from .roi_select_tool import RectangularROITool  # TIGS-53
@@ -75,7 +74,6 @@ class GeoGlyph:
         self._draw_tool = None  # Para la funcionalidad de dibujo
         self._annotation_manager = None  # Para la funcionalidad de dibujo
         self._roi_tool = None  # TIGS-53: herramienta de ROI rectangular
-        self._infer_worker = None  # TIGS-53: worker async aiohttp para /infer
         self._sam_worker = None  # TIGS-70: worker para ejecutar SAM real
         self._roi_rect = None  # QgsRectangle del ROI activo (pendiente de inferencia)
         self._roi_image_array = None  # np.ndarray extraído del ROI activo
@@ -129,7 +127,6 @@ class GeoGlyph:
         self.panel.btn_abrir_tiff.clicked.connect(self.abrir_geotiff)
         self.panel.btn_exportar.clicked.connect(self.exportar_capa_realzada)
         self.panel.btn_ejecutar_sam.clicked.connect(self._ejecutar_sam)
-        self.panel.btn_infer.clicked.connect(self._ejecutar_infer)  # boton de renderizar
 
         # Conectar el boton "Aplicar Realce" del panel
         self.panel.btn_apply.clicked.connect(self.apply_enhancement)
@@ -222,11 +219,6 @@ class GeoGlyph:
             self._color_ramp_worker.quit()
             self._color_ramp_worker.wait()
 
-        # TIGS-53: idem para el worker de /infer.
-        if self._infer_worker is not None and self._infer_worker.isRunning():
-            self._infer_worker.quit()
-            self._infer_worker.wait()
-
         # TIGS-91
         if self._health_worker is not None:
             self._health_worker.stop()
@@ -310,31 +302,28 @@ class GeoGlyph:
         if self._color_ramp_worker is not None and self._color_ramp_worker.isRunning():
             return
 
-        # Resolver la capa raster activa.
-        from qgis.core import QgsProject
+        # Resolver la capa raster — se usa la capa seleccionada en el árbol de
+        # capas porque es la misma que usó cargar_bandas para poblar combo_band.
+        # Esto garantiza que la banda elegida en el combo corresponda a la capa
+        # sobre la que se aplica el color ramp.
 
-        layer = self.iface.activeLayer()
-        if layer is None:
-            self.iface.messageBar().pushMessage("Error", "No hay capa activa", level=2)
-            return
-
-        if not isinstance(layer, QgsRasterLayer):
-            raster = next(
-                (cap for cap in QgsProject.instance().mapLayers().values() if isinstance(cap, QgsRasterLayer)),
-                None,
-            )
-            if raster is None:
+        selected = self.iface.layerTreeView().selectedLayers()
+        if selected and isinstance(selected[0], QgsRasterLayer):
+            layer = selected[0]
+        else:
+            layer = self.iface.activeLayer()
+            if layer is None or not isinstance(layer, QgsRasterLayer):
                 self.iface.messageBar().pushMessage(
                     "Error",
                     "Selecciona una capa raster antes de aplicar Color Ramp",
                     level=2,
                 )
                 return
-            layer = raster
 
         ramp_type = self.panel.combo_color_ramp.currentText()
         band_text = self.panel.combo_band.currentText().strip()
         extent_mode = self.panel.combo_color_ramp_extent.currentText()
+
         if not band_text:
             self.panel.lbl_enhance_status.setText("Selecciona una capa raster primero")
             self.panel.lbl_enhance_status.setStyleSheet("color: orange; font-size: 10px; margin-left: 4px;")
@@ -408,6 +397,7 @@ class GeoGlyph:
             "ramp_type": ramp_type,
             "band": band,
             "layer": layer,
+            "src_path": src_path,
             "extent_mode": extent_mode,
             "window": window,
         }
@@ -434,19 +424,27 @@ class GeoGlyph:
         self.panel.btn_apply.setEnabled(True)
 
         if min_val >= max_val:
-            self.panel.lbl_status.setText("Estado: —")
-            self.iface.messageBar().pushMessage(
-                "Error",
-                "Min debe ser menor que Max",
-                level=2,
-                duration=3,
-            )
+            ctx_band = self._color_ramp_context.get("band", "?")
+            if min_val == max_val:
+                msg = (
+                    f"La banda {ctx_band} tiene valores uniformes (min = max = {min_val:.4g}). "
+                    "Puede ser un canal alfa o una banda constante. Selecciona otra banda."
+                )
+            else:
+                msg = (
+                    f"Los valores manuales son inválidos: Min ({min_val}) ≥ Max ({max_val}). "
+                    "Introduce un Min menor que Max, o deja ambos en blanco para cálculo automático."
+                )
+            self.panel.lbl_enhance_status.setText(msg)
+            self.panel.lbl_enhance_status.setStyleSheet("color: red; font-size: 10px; margin-left: 4px;")
+            self.iface.messageBar().pushMessage("GeoGlyph — Color Ramp", msg, level=2, duration=6)
             return
 
         ctx = self._color_ramp_context
         ramp_type = ctx.get("ramp_type", "viridis")
         band = ctx.get("band", 1)
         layer = ctx.get("layer")
+        src_path = ctx.get("src_path")
         extent_mode = ctx.get("extent_mode")
         window = ctx.get("window")
         if layer is None:
@@ -483,93 +481,44 @@ class GeoGlyph:
         shader = QgsRasterShader()
         shader.setRasterShaderFunction(color_ramp)
 
-        import os
-        import tempfile
-
-        from osgeo import gdal
         from qgis.core import QgsRasterLayer
 
-        if extent_mode == "Vista actual" and window is not None:
-            src_path = layer.source()
-            if "|" in src_path:
-                src_path = src_path.split("|", 1)[0]
+        # Siempre se carga el archivo fuente completo y se aplica el renderer
+        # con la banda seleccionada. El worker ya calculó min/max para la banda
+        # correcta (y para la ventana visible en modo "Vista actual"), así que
+        # el shader ya refleja los estadísticos apropiados.
+        #
+        # Antes se creaba un GeoTIFF temporal de 1 sola banda para "Vista actual",
+        # lo que hacía que QGIS siempre mostrara "Banda 1 (Gray)" en la leyenda
+        # independientemente de qué banda hubiera seleccionado el usuario.
+        suffix = "vista" if (extent_mode == "Vista actual" and window is not None) else "completa"
+        layer_name = f"{layer.name()}_B{band}_{ramp_type}_{suffix}"
 
-            xoff, yoff, xsize, ysize = window
-
-            ds = gdal.Open(src_path, gdal.GA_ReadOnly)
-            band_obj = ds.GetRasterBand(band)
-
-            arr = band_obj.ReadAsArray(
-                xoff,
-                yoff,
-                xsize,
-                ysize,
+        new_layer = QgsRasterLayer(src_path, layer_name)
+        if not new_layer.isValid():
+            self.iface.messageBar().pushMessage(
+                "Error",
+                f"No se pudo cargar la capa desde {src_path}",
+                level=2,
+                duration=4,
             )
+            self.panel.btn_apply.setEnabled(True)
+            return
 
-            gt = ds.GetGeoTransform()
-
-            new_gt = (
-                gt[0] + xoff * gt[1],
-                gt[1],
-                gt[2],
-                gt[3] + yoff * gt[5],
-                gt[4],
-                gt[5],
-            )
-
-            tmp_path = os.path.join(
-                tempfile.gettempdir(),
-                f"{layer.name()}_{ramp_type}_view.tif",
-            )
-
-            driver = gdal.GetDriverByName("GTiff")
-            out_ds = driver.Create(
-                tmp_path,
-                xsize,
-                ysize,
-                1,
-                band_obj.DataType,
-            )
-
-            out_ds.SetGeoTransform(new_gt)
-            out_ds.SetProjection(ds.GetProjection())
-
-            out_band = out_ds.GetRasterBand(1)
-            out_band.WriteArray(arr)
-
-            out_ds.FlushCache()
-
-            ds = None
-            out_ds = None
-
-            new_layer = QgsRasterLayer(
-                tmp_path,
-                f"{layer.name()}_{ramp_type}_view",
-            )
-
-            provider = new_layer.dataProvider()
-            renderer = QgsSingleBandPseudoColorRenderer(
-                provider,
-                1,
-                shader,
-            )
-
-            new_layer.setRenderer(renderer)
-
-        else:
-            provider = layer.dataProvider()
-
-            renderer = QgsSingleBandPseudoColorRenderer(
-                provider,
-                band,
-                shader,
-            )
-
-            new_layer = layer.clone()
-            new_layer.setRenderer(renderer)
-            new_layer.setName(f"{layer.name()}_{ramp_type}")
+        provider = new_layer.dataProvider()
+        renderer = QgsSingleBandPseudoColorRenderer(provider, band, shader)
+        new_layer.setRenderer(renderer)
 
         QgsProject.instance().addMapLayer(new_layer)
+
+        # Re-activar la capa original para que la selección del árbol de capas
+        # vuelva al raster fuente (y cargar_bandas repueble el combo correctamente).
+        self.iface.setActiveLayer(layer)
+        # Después de setActiveLayer, cargar_bandas se dispara y podría resetear
+        # el combo. Restauramos explícitamente la banda que se acaba de aplicar.
+        idx = self.panel.combo_band.findText(str(band))
+        if idx >= 0:
+            self.panel.combo_band.setCurrentIndex(idx)
 
         self.panel.lbl_enhance_status.setText(f"Color Ramp «{ramp_type}» aplicado ✓")
         self.panel.lbl_enhance_status.setStyleSheet("color: green; font-size: 10px; margin-left: 4px;")
@@ -1177,73 +1126,6 @@ class GeoGlyph:
         self.panel.btn_ejecutar_sam.setEnabled(True)
         self.panel.btn_roi.setEnabled(True)
 
-    def _on_infer_ok(self, status_code, elapsed, body):
-        """Callback ejecutado en el hilo principal cuando /infer responde OK.
-
-        El body sigue el contrato InferResponse de TIGS-49:
-            { status, detections[{polygon, confidence}], model_version,
-              timestamp, processing_time_ms }
-        """
-        detections = body.get("detections", []) if isinstance(body, dict) else []
-        print(f"DEBUG detections: {detections}")
-        print(f"DEBUG body: {body}")
-        n = len(detections)
-        # Mostramos en el label de estado el primer score (orientativo) +
-        # versión del modelo para distinguir mock vs SAM real.
-        if n > 0 and isinstance(detections[0], dict):
-            conf = detections[0].get("confidence", "—")
-            model = body.get("model_version", "?")
-            self.panel.lbl_status.setText(
-                f"Estado: HTTP {status_code} · {elapsed:.2f}s · {n} det · score={conf} · modelo={model}"
-            )
-        else:
-            self.panel.lbl_status.setText(f"Estado: HTTP {status_code} · {elapsed:.2f}s · sin detecciones")
-        self.panel.lbl_status.setStyleSheet("color: green; font-size: 10px; margin-left: 4px;")
-        self.panel.btn_infer.setEnabled(True)
-        primer_score = detections[0].get("confidence", 0) if detections else 0
-        self.panel.lbl_score.setText(f"Confianza: {primer_score:.0%}" if detections else "Confianza: sin detecciones")
-        # Convertir polígonos del backend a anotaciones en QGIS
-        manager = self._get_or_create_annotation_manager()
-        fids_nuevos = []
-        for det in detections:
-            puntos = [QgsPointXY(p[0], p[1]) for p in det.get("polygon", [])]
-            if len(puntos) < 3:
-                continue
-            geometry = QgsGeometry.fromPolygonXY([puntos])
-            feature = manager.agregar_anotacion(geometry, origin="ml", score=det.get("confidence"))
-            if feature.isValid():
-                fids_nuevos.append(feature.id())
-
-        self._activar_edicion_anotaciones(manager, fids_nuevos)
-
-    def _on_infer_error(self, msg):
-        """Callback de error del worker /infer.
-
-        Degradación controlada (DoD TIGS-53): se notifica al usuario con
-        un QMessageBox + label de estado, pero la herramienta de anotación
-        manual sigue funcional — no se desactiva ni el panel ni el botón
-        de dibujo de polígonos.
-        """
-        # Import diferido para no cargar QtWidgets si nunca falla la inferencia.
-        from qgis.PyQt.QtWidgets import QMessageBox
-
-        # Mensaje en el label del panel (no intrusivo).
-        self.panel.lbl_status.setText(f"Error /infer: {msg}")
-        self.panel.lbl_status.setStyleSheet("color: red; font-size: 10px; margin-left: 4px;")
-        self.panel.btn_infer.setEnabled(True)
-        self.panel.lbl_score.setText("Confianza: —")
-
-        # QMessageBox modal pero sin bloquear el resto del plugin: deja
-        # claro al usuario que la inferencia falló y que aún puede seguir
-        # anotando manualmente.
-        QMessageBox.warning(
-            self.iface.mainWindow(),
-            "GeoGlyph — backend no disponible",
-            f"No se pudo enviar el ROI al backend:\n\n{msg}\n\n"
-            "Puedes seguir trabajando con la anotación manual "
-            '("Dibujar polígono").',
-        )
-
     # ── TIGS-70: handlers para SamWorker (SAM real) ────────────────────────
 
     def _on_sam_finished(self, mask: np.ndarray, confidence: float):
@@ -1515,27 +1397,6 @@ class GeoGlyph:
                 level=2,  # error
                 duration=4,
             )
-
-    def _ejecutar_infer(self):
-        # Lanza InferWorker para llamar POST /infer y renderizar polígonos.
-        if self._infer_worker is not None and self._infer_worker.isRunning():
-            return
-
-        self.panel.btn_infer.setEnabled(False)
-        self.panel.lbl_status.setText("Estado: Conectando con backend...")
-        self.panel.lbl_status.setStyleSheet("color: orange; font-size: 10px; margin-left: 4px;")
-
-        layer = self.iface.activeLayer()
-        if layer is not None:
-            ext = layer.extent()
-            bbox = [ext.xMinimum(), ext.yMinimum(), ext.xMaximum(), ext.yMaximum()]
-        else:
-            bbox = [0, 0, 256, 256]
-
-        self._infer_worker = InferWorker(bbox=bbox)
-        self._infer_worker.finished.connect(self._on_infer_ok)
-        self._infer_worker.error.connect(self._on_infer_error)
-        self._infer_worker.start()
 
     # TIGS-100: Vista dividida (Split View)
     # Activa o desactiva la vista dividida al hacer clic en el botón.
